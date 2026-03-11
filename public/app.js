@@ -151,7 +151,18 @@ function extractTopicFromObject(topicLike) {
 function extractTopicFromParagraph(paragraph) {
   const safe = paragraph && typeof paragraph === "object" ? paragraph : {};
 
-  // 1) paragraph.topic.label + paragraph.topic.score
+  // 0) compatibility path (legacy): paragraph.topic.label + paragraph.topic.score
+  if (safe.topic && typeof safe.topic === "object") {
+    const rawLabel = typeof safe.topic.label === "string" ? safe.topic.label.trim() : "";
+    if (rawLabel) {
+      return {
+        label: rawLabel,
+        score: normalizeTopicScore(safe.topic.score),
+      };
+    }
+  }
+
+  // 1) paragraph.topic.label + paragraph.topic.score (generic)
   if (safe.topic && typeof safe.topic === "object") {
     const topicObject = extractTopicFromObject({
       label: safe.topic.label,
@@ -429,15 +440,63 @@ function renderTopicDebug(payload, globalTopic, model) {
   const hasParagraphTopic = Array.isArray(model?.items)
     ? model.items.some((item) => item.hasTopicLabel)
     : false;
+  const hasPayload = payload && typeof payload === "object";
+  const paragraphs = hasPayload && Array.isArray(payload.paragraphs) ? payload.paragraphs : [];
+  const globalPresence = hasPayload
+    ? {
+        topics: Object.prototype.hasOwnProperty.call(payload, "topics"),
+        topics_global: Object.prototype.hasOwnProperty.call(payload, "topics_global"),
+        topic: Object.prototype.hasOwnProperty.call(payload, "topic"),
+        topic_label: Object.prototype.hasOwnProperty.call(payload, "topic_label"),
+        topic_info: Object.prototype.hasOwnProperty.call(payload, "topic_info"),
+        topic_prediction: Object.prototype.hasOwnProperty.call(payload, "topic_prediction"),
+      }
+    : {
+        topics: false,
+        topics_global: false,
+        topic: false,
+        topic_label: false,
+        topic_info: false,
+        topic_prediction: false,
+      };
+
+  const paragraphPresenceLines = [];
+  for (let i = 0; i < Math.min(paragraphs.length, 6); i += 1) {
+    const p = paragraphs[i] && typeof paragraphs[i] === "object" ? paragraphs[i] : {};
+    const hasTopic = Object.prototype.hasOwnProperty.call(p, "topic");
+    const hasTopics = Object.prototype.hasOwnProperty.call(p, "topics");
+    const hasTopicLabel = Object.prototype.hasOwnProperty.call(p, "topic_label");
+    const hasTopicLabelCamel = Object.prototype.hasOwnProperty.call(p, "topicLabel");
+
+    paragraphPresenceLines.push(
+      `P${i + 1} keysHas: topic=${hasTopic} topics=${hasTopics} topic_label=${hasTopicLabel} topicLabel=${hasTopicLabelCamel}`
+    );
+
+    if (hasTopic) {
+      let preview = "null";
+      try {
+        preview = JSON.stringify(p.topic);
+      } catch (_err) {
+        preview = "[topicPreview tidak bisa di-serialize]";
+      }
+      if (typeof preview === "string" && preview.length > 200) {
+        preview = `${preview.slice(0, 200)}...`;
+      }
+      paragraphPresenceLines.push(`P${i + 1} topicPreview: ${preview}`);
+    }
+  }
+
   const debugNote =
     !hasGlobalTopic && !hasParagraphTopic
-      ? "Topik tidak ditemukan pada payload backend."
+      ? "Backend tidak mengirim data topik. UI tidak dapat menampilkan topik."
       : "Topik terdeteksi dari payload.";
 
   box.textContent = [
     "[DEBUG topic]",
     `payload keys: ${topKeys.join(", ") || "-"}`,
     `paragraph[0] keys: ${paragraph0Keys.join(", ") || "-"}`,
+    `global keysHas: topics=${globalPresence.topics} topics_global=${globalPresence.topics_global} topic=${globalPresence.topic} topic_label=${globalPresence.topic_label} topic_info=${globalPresence.topic_info} topic_prediction=${globalPresence.topic_prediction}`,
+    ...paragraphPresenceLines,
     "topic snippet:",
     debugTopicSnippet(payload),
     `note: ${debugNote}`,
@@ -830,7 +889,8 @@ function prepareParagraphModel(paragraphs, globalTopic = { label: null, score: n
     const paragraphTopic = extractTopicFromParagraph(paragraph);
     const resolvedTopicLabel = paragraphTopic.label || globalTopicLabel || null;
     const resolvedTopicScore = paragraphTopic.label ? paragraphTopic.score : globalTopicScore;
-    const hasTopicLabel = Boolean(resolvedTopicLabel);
+    const normalizedTopicLabel = cleanTopicLabel(resolvedTopicLabel);
+    const hasTopicLabel = Boolean(normalizedTopicLabel);
     const hasTopicScore =
       hasTopicLabel &&
       Number.isFinite(Number(resolvedTopicScore)) &&
@@ -839,7 +899,7 @@ function prepareParagraphModel(paragraphs, globalTopic = { label: null, score: n
     items.push({
       paragraphNumber,
       paragraphLabel,
-      topicLabel: resolvedTopicLabel || "-",
+      topicLabel: normalizedTopicLabel || "-",
       topicScore: resolvedTopicScore,
       hasTopicLabel,
       hasTopicScore,
