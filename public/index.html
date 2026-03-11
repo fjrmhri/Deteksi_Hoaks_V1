@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Deteksi Hoaks Indonesia</title>
+    <title>Deteksi Hoaks Berita</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -13,87 +13,40 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <main class="container">
-      <header class="hero card">
-        <p class="kicker">Analisis Kalimat • IndoBERT</p>
-        <h1>Deteksi Berita Indonesia Hoaks Menggunakan IndoBERT</h1>
+    <main class="app-container">
+      <section class="card input-section">
+        <h1>Deteksi Hoaks Berita</h1>
         <p class="subtitle">
-          Tempel teks multi paragraf, lalu sistem memberi highlight per kalimat
-          (Hoaks/Fakta/Perlu Cek) dengan ringkasan confidence dan topik paragraf.
+          Masukkan teks berita multi paragraf untuk melihat highlight kalimat hoaks/fakta.
         </p>
-      </header>
-
-      <section class="card controls">
-        <h2 class="controls__title">Analisis Berita</h2>
-
-        <div class="quick-actions">
-          <button id="sampleBtn" class="secondary small" type="button">
-            Isi contoh
-          </button>
-          <button id="clearBtn" class="secondary small" type="button">
-            Reset input
-          </button>
-        </div>
 
         <textarea
           id="newsText"
-          rows="11"
-          placeholder="Masukkan teks berita atau narasi panjang di sini..."
+          rows="12"
+          placeholder="Tempel teks berita di sini..."
         ></textarea>
 
-        <p id="inputStats" class="input-stats">0 karakter • 0 kata • 0 paragraf</p>
-
-        <p class="hint">
-          Tips: pisahkan paragraf dengan satu baris kosong agar analisis topik
-          dan kalimat lebih rapi.
-        </p>
-
-        <div class="button-row">
-          <button id="submitBtn" type="button" class="primary">
-            <span id="submitLabel">Analisis</span>
-            <span id="submitSpinner" class="spinner hidden"></span>
+        <div class="action-row">
+          <button id="detectBtn" type="button" class="btn btn-primary">
+            <span id="detectLabel">Deteksi</span>
+            <span id="detectSpinner" class="spinner hidden" aria-hidden="true"></span>
           </button>
-          <button id="copyBtn" type="button" class="secondary">Copy hasil</button>
-          <button id="shareBtn" type="button" class="secondary">Share</button>
-          <button id="toggleParagraphsBtn" type="button" class="secondary">
-            Tutup semua paragraf
-          </button>
-        </div>
-
-        <div class="legend">
-          <span class="chip chip-red">Merah = Hoaks</span>
-          <span class="chip chip-green">Hijau = Fakta</span>
-          <span class="chip chip-orange">Oranye = Perlu cek</span>
+          <button id="sampleBtn" type="button" class="btn btn-secondary">Isi contoh</button>
+          <button id="resetBtn" type="button" class="btn btn-secondary">Reset</button>
         </div>
       </section>
 
-      <section id="loader" class="card loader hidden">
-        <p>Memproses analisis kalimat, mohon tunggu sebentar...</p>
+      <section id="errorBox" class="card error-box hidden" role="alert"></section>
+
+      <section id="outputSection" class="card output-section hidden">
+        <h2>Hasil Highlight Inline</h2>
+        <div id="outputParagraphs" class="paragraph-list"></div>
       </section>
 
-      <section id="statusPanel" class="card status hidden"></section>
-
-      <section id="resultPanel" class="card hidden">
-        <div class="result-head">
-          <h2>Ringkasan Hasil</h2>
-          <span id="resultBadge" class="badge">Menunggu...</span>
-        </div>
-
-        <p id="resultDecision" class="result__decision"></p>
-        <p id="resultScore" class="result__score"></p>
-        <p id="resultSummary" class="result__summary"></p>
-        <p id="resultRiskExplanation" class="result__risk"></p>
-
-        <details id="topicPanel" class="accordion" open>
-          <summary>Topik</summary>
-          <div id="sharedTopics" class="shared-topics hidden"></div>
-        </details>
-
-        <details id="highlightPanel" class="accordion" open>
-          <summary>Hasil Highlight</summary>
-          <div id="paragraphResults" class="paragraph-results"></div>
-        </details>
-      </section>
+      <details id="confidenceDetails" class="card confidence-section hidden">
+        <summary id="confidenceSummary">Rincian Keyakinan</summary>
+        <ul id="confidenceList" class="confidence-list"></ul>
+      </details>
     </main>
 
     <script src="app.js" type="module"></script>
