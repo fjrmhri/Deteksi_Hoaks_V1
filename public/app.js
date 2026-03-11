@@ -86,6 +86,7 @@ const submitBtn = document.getElementById("submitBtn");
 const submitLabel = document.getElementById("submitLabel");
 const submitSpinner = document.getElementById("submitSpinner");
 const newsText = document.getElementById("newsText");
+const loader = document.getElementById("loader");
 const sampleBtn = document.getElementById("sampleBtn");
 const clearBtn = document.getElementById("clearBtn");
 const inputStats = document.getElementById("inputStats");
@@ -209,6 +210,7 @@ const setLoading = (isLoading) => {
   submitBtn.disabled = isLoading;
   if (sampleBtn) sampleBtn.disabled = isLoading;
   if (clearBtn) clearBtn.disabled = isLoading;
+  if (loader) loader.classList.toggle("hidden", !isLoading);
   if (isLoading) {
     submitSpinner.classList.remove("hidden");
     submitLabel.textContent = "Memproses...";
