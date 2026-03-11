@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Deteksi Hoaks IndoBERT</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="page page--scaled">
+      <header class="hero">
+        <div class="hero__text">
+          <h1>Deteksi Hoaks Berita</h1>
+          <p>
+            Analisis multi-paragraf dengan IndoBERT: prediksi dokumen,
+            highlight per kalimat, dan topik per paragraf.
+          </p>
+        </div>
+        <div class="hero__right">
+          <div class="hero__pill">github/fjrmhri</div>
+        </div>
+      </header>
+
+      <main class="container">
+        <section class="card">
+          <h2>Analisis Berita</h2>
+          <textarea
+            id="newsText"
+            rows="10"
+            placeholder="Tempel teks berita (bisa beberapa paragraf)..."
+          ></textarea>
+          <p class="hint">
+            Tips: pisahkan paragraf dengan baris kosong agar analisis topik per
+            paragraf lebih jelas.
+          </p>
+          <button id="submitBtn" type="button">
+            <span id="submitLabel">Analisis sekarang</span>
+            <span id="submitSpinner" class="spinner hidden"></span>
+          </button>
+        </section>
+
+        <section id="statusPanel" class="status card hidden"></section>
+
+        <section id="resultPanel" class="card hidden">
+          <div class="card__header">
+            <h2>Hasil Analisis</h2>
+            <span id="resultBadge" class="badge">Menunggu...</span>
+          </div>
+
+          <p id="resultDecision" class="result__decision"></p>
+          <p id="resultScore" class="result__score"></p>
+          <p id="resultSummary" class="result__summary"></p>
+          <p id="resultRiskExplanation" class="result__risk"></p>
+
+          <div id="sharedTopics" class="shared-topics hidden"></div>
+
+          <div class="actions-row">
+            <button id="copyBtn" class="secondary small" type="button">
+              Copy hasil
+            </button>
+            <button id="shareBtn" class="secondary small" type="button">
+              Share
+            </button>
+          </div>
+
+          <hr class="divider" />
+
+          <div id="paragraphResults" class="paragraph-results"></div>
+        </section>
+
+        <section class="card">
+          <h2>Tentang Sistem V1</h2>
+          <p class="hint">
+            Jalur keputusan utama tetap dari classifier doc-level IndoBERT.
+            Analisis kalimat dan topik ditambahkan sebagai post-processing
+            inferensi untuk membantu interpretasi hasil.
+          </p>
+          <ul>
+            <li>Model utama: <strong>indolem/indobert-base-uncased</strong></li>
+            <li>Output: label dokumen + kalimat + topic badge per paragraf</li>
+            <li>Deploy: FastAPI di Hugging Face Spaces, frontend di Vercel</li>
+          </ul>
+        </section>
+      </main>
+
+      <footer>
+        <p>
+          Model dilatih di <strong>Google Colab</strong> dan disajikan via
+          <strong>FastAPI</strong> di <strong>Hugging Face Spaces</strong>.
+        </p>
+      </footer>
+    </div>
+
+    <script src="app.js" type="module"></script>
+  </body>
+</html>
