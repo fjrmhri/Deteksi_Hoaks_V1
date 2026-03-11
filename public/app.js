@@ -5,6 +5,114 @@ const DETAIL_TEXT_MAX_LEN = 190;
 const isDebug =
   typeof window !== "undefined" &&
   new URLSearchParams(window.location.search).get("debug") === "1";
+const ID_STOPWORDS = new Set([
+  "yang",
+  "dan",
+  "di",
+  "ke",
+  "dari",
+  "untuk",
+  "dengan",
+  "pada",
+  "adalah",
+  "itu",
+  "ini",
+  "tersebut",
+  "atau",
+  "karena",
+  "agar",
+  "juga",
+  "dalam",
+  "sebagai",
+  "oleh",
+  "bahwa",
+  "namun",
+  "tetapi",
+  "saat",
+  "ketika",
+  "setelah",
+  "sebelum",
+  "tanpa",
+  "sudah",
+  "belum",
+  "masih",
+  "akan",
+  "bisa",
+  "dapat",
+  "harus",
+  "lebih",
+  "kurang",
+  "hanya",
+  "hingga",
+  "sampai",
+  "jadi",
+  "yakni",
+  "yaitu",
+  "ialah",
+  "para",
+  "kami",
+  "kita",
+  "saya",
+  "aku",
+  "anda",
+  "mereka",
+  "dia",
+  "ia",
+  "maka",
+  "pun",
+  "lah",
+  "kah",
+  "nya",
+  "sebuah",
+  "seorang",
+  "beberapa",
+  "banyak",
+  "semua",
+  "tiap",
+  "setiap",
+  "antara",
+  "hingga",
+  "tentang",
+  "dalamnya",
+  "atas",
+  "bawah",
+  "secara",
+  "langsung",
+  "tidak",
+  "bukan",
+  "ya",
+  "iya",
+  "nah",
+  "si",
+  "sang",
+  "sehingga",
+  "supaya",
+  "serta",
+  "lagi",
+  "pula",
+  "telah",
+  "sedang",
+  "menjadi",
+  "terjadi",
+  "terhadap",
+  "menurut",
+  "seperti",
+  "bagi",
+  "guna",
+  "demi",
+  "apa",
+  "siapa",
+  "mana",
+  "kapan",
+  "mengapa",
+  "bagaimana",
+  "atau",
+  "dll",
+  "dsb",
+  "yak",
+  "oke",
+  "ok",
+]);
 
 function normalizeApiBaseUrl(rawUrl) {
   const raw = String(rawUrl || "").trim();
@@ -367,6 +475,70 @@ function formatTopicMeta(label, score) {
   return `Topik: ${safeLabel}`;
 }
 
+function inferTopicLocal(paragraphText) {
+  const raw = String(paragraphText || "").toLowerCase();
+  if (!raw.trim()) return { label: null, score: null };
+
+  const cleaned = raw.replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+  if (!cleaned) return { label: null, score: null };
+
+  const tokens = cleaned
+    .split(" ")
+    .map((token) => token.trim())
+    .filter((token) => token.length > 2 && !ID_STOPWORDS.has(token));
+  if (tokens.length === 0) return { label: null, score: null };
+
+  const freq = new Map();
+  tokens.forEach((token) => {
+    freq.set(token, (freq.get(token) || 0) + 1);
+  });
+
+  const ranked = Array.from(freq.entries()).sort((a, b) => {
+    if (b[1] !== a[1]) return b[1] - a[1];
+    return a[0].localeCompare(b[0]);
+  });
+  if (ranked.length === 0) return { label: null, score: null };
+
+  const top1 = ranked[0];
+  const top2 = ranked[1];
+  const label = top2 ? `${top1[0]} / ${top2[0]}` : top1[0];
+  const score = Math.max(0, Math.min(1, top1[1] / tokens.length));
+
+  return { label, score: Number.isFinite(score) && score > 0 ? score : null };
+}
+
+function resolveParagraphTopic(paragraph, globalTopic, paragraphText, isFallback) {
+  const backendTopic = extractTopicFromParagraph(paragraph);
+  const backendLabel = cleanTopicLabel(backendTopic?.label);
+  if (backendLabel) {
+    return {
+      label: backendLabel,
+      score: normalizeTopicScore(backendTopic?.score),
+    };
+  }
+
+  if (isFallback) {
+    const localTopic = inferTopicLocal(paragraphText);
+    const localLabel = cleanTopicLabel(localTopic?.label);
+    if (localLabel) {
+      return {
+        label: localLabel,
+        score: normalizeTopicScore(localTopic?.score),
+      };
+    }
+  }
+
+  const globalLabel = cleanTopicLabel(globalTopic?.label);
+  if (globalLabel) {
+    return {
+      label: globalLabel,
+      score: normalizeTopicScore(globalTopic?.score),
+    };
+  }
+
+  return { label: null, score: null };
+}
+
 function debugTopicSnippet(payload) {
   const paragraph0 =
     payload && Array.isArray(payload.paragraphs) && payload.paragraphs.length > 0
@@ -418,7 +590,7 @@ function clearDebugBox() {
   if (existing) existing.remove();
 }
 
-function renderTopicDebug(payload, globalTopic, model) {
+function renderTopicDebug(payload, globalTopic, model, options = {}) {
   if (!isDebug) {
     clearDebugBox();
     return;
@@ -490,9 +662,11 @@ function renderTopicDebug(payload, globalTopic, model) {
     !hasGlobalTopic && !hasParagraphTopic
       ? "Backend tidak mengirim data topik. UI tidak dapat menampilkan topik."
       : "Topik terdeteksi dari payload.";
+  const fallbackLine = `isFallback=${Boolean(options?.isFallback)}`;
 
   box.textContent = [
     "[DEBUG topic]",
+    fallbackLine,
     `payload keys: ${topKeys.join(", ") || "-"}`,
     `paragraph[0] keys: ${paragraph0Keys.join(", ") || "-"}`,
     `global keysHas: topics=${globalPresence.topics} topics_global=${globalPresence.topics_global} topic=${globalPresence.topic} topic_label=${globalPresence.topic_label} topic_info=${globalPresence.topic_info} topic_prediction=${globalPresence.topic_prediction}`,
@@ -828,7 +1002,7 @@ function buildFallbackParagraphs(paragraphsFromBackend, inputTextUsed) {
     rebuilt.push({
       paragraph_index: i,
       text: inputParagraphs[i],
-      topic: { label: "-", score: null, keywords: [] },
+      topic: null,
       sentences: slice,
     });
   }
@@ -853,11 +1027,17 @@ function extractParagraphs(payload, inputTextUsed) {
   return buildFallbackParagraphs(sorted, inputTextUsed);
 }
 
-function prepareParagraphModel(paragraphs, globalTopic = { label: null, score: null }) {
+function prepareParagraphModel(
+  paragraphs,
+  globalTopic = { label: null, score: null },
+  options = {}
+) {
   const sorted = sortByParagraphIndex(paragraphs);
   const items = [];
-  const globalTopicLabel = cleanTopicLabel(globalTopic?.label);
-  const globalTopicScore = normalizeTopicScore(globalTopic?.score);
+  const isFallback = Boolean(options?.isFallback);
+  const inputParagraphTexts = Array.isArray(options?.inputParagraphTexts)
+    ? options.inputParagraphTexts
+    : [];
 
   let sentenceCount = 0;
   let sentenceHoaksCount = 0;
@@ -886,10 +1066,17 @@ function prepareParagraphModel(paragraphs, globalTopic = { label: null, score: n
       }
     });
 
-    const paragraphTopic = extractTopicFromParagraph(paragraph);
-    const resolvedTopicLabel = paragraphTopic.label || globalTopicLabel || null;
-    const resolvedTopicScore = paragraphTopic.label ? paragraphTopic.score : globalTopicScore;
-    const normalizedTopicLabel = cleanTopicLabel(resolvedTopicLabel);
+    const paragraphTextForTopic = String(
+      paragraph?.text ?? inputParagraphTexts[index] ?? ""
+    );
+    const resolvedTopic = resolveParagraphTopic(
+      paragraph,
+      globalTopic,
+      paragraphTextForTopic,
+      isFallback
+    );
+    const normalizedTopicLabel = cleanTopicLabel(resolvedTopic?.label);
+    const resolvedTopicScore = normalizeTopicScore(resolvedTopic?.score);
     const hasTopicLabel = Boolean(normalizedTopicLabel);
     const hasTopicScore =
       hasTopicLabel &&
@@ -903,7 +1090,7 @@ function prepareParagraphModel(paragraphs, globalTopic = { label: null, score: n
       topicScore: resolvedTopicScore,
       hasTopicLabel,
       hasTopicScore,
-      paragraphText: String(paragraph?.text ?? ""),
+      paragraphText: paragraphTextForTopic,
       sentences,
     });
   });
@@ -924,12 +1111,12 @@ function prepareParagraphModel(paragraphs, globalTopic = { label: null, score: n
   };
 }
 
-function renderOutputInlineWithPayload(payload, paragraphs) {
+function renderOutputInlineWithPayload(payload, paragraphs, options = {}) {
   if (!outputSection || !outputParagraphs || !globalSummary) return null;
 
   outputParagraphs.innerHTML = "";
   const globalTopic = extractGlobalTopic(payload);
-  const model = prepareParagraphModel(paragraphs, globalTopic);
+  const model = prepareParagraphModel(paragraphs, globalTopic, options);
 
   let summaryText =
     `Ringkasan: ${labelText(model.overallLabel)} • ${model.counts.paragraphCount} paragraf • ` +
@@ -951,7 +1138,7 @@ function renderOutputInlineWithPayload(payload, paragraphs) {
     outputParagraphs.innerHTML =
       '<p class="paragraph-meta">Tidak ada paragraf yang bisa ditampilkan.</p>';
     outputSection.classList.remove("hidden");
-    renderTopicDebug(payload, globalTopic, model);
+    renderTopicDebug(payload, globalTopic, model, options);
     return { model, globalTopic };
   }
 
@@ -984,13 +1171,13 @@ function renderOutputInlineWithPayload(payload, paragraphs) {
 
   outputParagraphs.appendChild(fragment);
   outputSection.classList.remove("hidden");
-  renderTopicDebug(payload, globalTopic, model);
+  renderTopicDebug(payload, globalTopic, model, options);
 
   return { model, globalTopic };
 }
 
 function renderOutputInline(paragraphs) {
-  return renderOutputInlineWithPayload(null, paragraphs);
+  return renderOutputInlineWithPayload(null, paragraphs, {});
 }
 
 function renderConfidenceDetails(paragraphs, globalTopic = { label: null, score: null }) {
@@ -1106,14 +1293,20 @@ async function handleDetect() {
   }
 
   const textToSend = normalizeParagraphBreaks(text);
+  const inputParagraphTexts = splitParagraphsByBlankLine(textToSend);
 
   setLoading(true);
   try {
     const payload = await callAnalyzeApi(textToSend);
     lastPayload = payload;
+    const backendParagraphCount = Array.isArray(lastPayload?.paragraphs)
+      ? lastPayload.paragraphs.length
+      : 0;
+    const isFallback = backendParagraphCount === 1 && inputParagraphTexts.length > 1;
     const paragraphs = extractParagraphs(lastPayload, textToSend);
+    const renderOptions = { isFallback, inputParagraphTexts };
 
-    const rendered = renderOutputInlineWithPayload(lastPayload, paragraphs);
+    const rendered = renderOutputInlineWithPayload(lastPayload, paragraphs, renderOptions);
     renderConfidenceDetails(paragraphs, rendered?.globalTopic);
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Terjadi kesalahan saat memproses.";
