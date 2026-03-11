@@ -153,6 +153,7 @@ const detectLabel = document.getElementById("detectLabel");
 const detectSpinner = document.getElementById("detectSpinner");
 const resetBtn = document.getElementById("resetBtn");
 const newsText = document.getElementById("newsText");
+const topicToggle = document.getElementById("topicToggle");
 
 const statParagraphs = document.getElementById("statParagraphs");
 const statSentences = document.getElementById("statSentences");
@@ -855,25 +856,39 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = API_TIMEOUT_MS) {
   }
 }
 
-async function callAnalyzeApi(text) {
+async function callAnalyzeApi(text, topicPerParagraph) {
   if (!apiBaseUrl) throw new Error("API base URL kosong.");
 
   const endpoint = `${apiBaseUrl}/analyze`;
-
-  try {
-    const response = await fetchWithTimeout(endpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text }),
-    });
-
+  const parsePayload = async (response) => {
     const payload = await response.json().catch(() => null);
     if (!response.ok || !payload) {
       const detail = payload && payload.detail ? payload.detail : response.statusText;
       throw new Error(`Gagal request (${response.status}): ${detail || "Unknown error"}`);
     }
-
     return payload;
+  };
+
+  try {
+    let response = await fetchWithTimeout(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        text,
+        topic_per_paragraph: Boolean(topicPerParagraph),
+      }),
+    });
+
+    // Kompatibilitas backend lama: retry sekali jika field baru ditolak.
+    if (response.status === 422) {
+      response = await fetchWithTimeout(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+    }
+
+    return await parsePayload(response);
   } catch (err) {
     if (err instanceof DOMException && err.name === "AbortError") {
       throw new Error("Koneksi timeout saat menghubungi backend.");
@@ -1294,10 +1309,11 @@ async function handleDetect() {
 
   const textToSend = normalizeParagraphBreaks(text);
   const inputParagraphTexts = splitParagraphsByBlankLine(textToSend);
+  const topicPerParagraph = Boolean(topicToggle?.checked);
 
   setLoading(true);
   try {
-    const payload = await callAnalyzeApi(textToSend);
+    const payload = await callAnalyzeApi(textToSend, topicPerParagraph);
     lastPayload = payload;
     const backendParagraphCount = Array.isArray(lastPayload?.paragraphs)
       ? lastPayload.paragraphs.length

@@ -131,6 +131,7 @@ class BatchPredictResponse(BaseModel):
 
 class AnalyzeRequest(BaseModel):
     text: str
+    topic_per_paragraph: bool = False
 
 
 class DocumentSummary(BaseModel):
@@ -191,6 +192,7 @@ class AnalyzeResponse(BaseModel):
     document: DocumentAnalysis
     paragraphs: List[ParagraphAnalysis]
     shared_topics: List[SharedTopic]
+    topics_global: Optional[TopicInfo] = None
     meta: AnalyzeMeta
 
 
@@ -587,6 +589,7 @@ def analyze(request: AnalyzeRequest):
             ),
             paragraphs=[],
             shared_topics=[],
+            topics_global=None,
             meta=AnalyzeMeta(
                 model_id=MODEL_ID,
                 max_length=MAX_LENGTH,
@@ -643,7 +646,21 @@ def analyze(request: AnalyzeRequest):
             )
         )
 
-    topics = _extract_topics(paragraph_texts)
+    fallback_topic = TopicInfo(
+        label="topik_umum",
+        score=0.0,
+        keywords=["topik_umum"],
+    )
+
+    topics_global: Optional[TopicInfo] = None
+    if request.topic_per_paragraph:
+        topics = _extract_topics(paragraph_texts)
+    else:
+        doc_for_topic = "\n\n".join(paragraph_texts)
+        global_topics = _extract_topics([doc_for_topic]) if doc_for_topic else []
+        global_topic = global_topics[0] if global_topics else fallback_topic
+        topics_global = global_topic
+        topics = [global_topic for _ in paragraph_texts]
 
     paragraphs: List[ParagraphAnalysis] = []
     hoax_sentence_count = 0
@@ -666,11 +683,7 @@ def analyze(request: AnalyzeRequest):
             p_label = "not_hoax"
             p_conf = 0.0
 
-        topic_info = topics[p_idx] if p_idx < len(topics) else TopicInfo(
-            label="topik_umum",
-            score=0.0,
-            keywords=["topik_umum"],
-        )
+        topic_info = topics[p_idx] if p_idx < len(topics) else fallback_topic
 
         paragraphs.append(
             ParagraphAnalysis(
@@ -716,6 +729,7 @@ def analyze(request: AnalyzeRequest):
         ),
         paragraphs=paragraphs,
         shared_topics=shared_topics,
+        topics_global=topics_global,
         meta=AnalyzeMeta(
             model_id=MODEL_ID,
             max_length=MAX_LENGTH,
