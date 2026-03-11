@@ -2,6 +2,9 @@ const DEFAULT_API_BASE_URL = "https://fjrmhri-ta-final-space.hf.space";
 const API_TIMEOUT_MS = 25000;
 const CONFIDENCE_CUTOFF = 0.65;
 const DETAIL_TEXT_MAX_LEN = 190;
+const isDebug =
+  typeof window !== "undefined" &&
+  new URLSearchParams(window.location.search).get("debug") === "1";
 
 function normalizeApiBaseUrl(rawUrl) {
   const raw = String(rawUrl || "").trim();
@@ -77,7 +80,13 @@ function formatPercent(value) {
 }
 
 function normalizeTopicScore(score) {
-  const n = Number(score);
+  let parsed = score;
+  if (typeof parsed === "string") {
+    const cleaned = parsed.trim().replace(/%/g, "");
+    if (!cleaned) return null;
+    parsed = cleaned;
+  }
+  const n = Number(parsed);
   if (!Number.isFinite(n) || n < 0) return null;
   if (n <= 1) return n;
   if (n <= 100) return n / 100;
@@ -116,7 +125,8 @@ function extractTopicFromObject(topicLike) {
     topicLike.topic_label,
     topicLike.topic,
     topicLike.name,
-    topicLike.topicName
+    topicLike.topicName,
+    topicLike.topicLabel
   );
 
   if (!label) return { label: null, score: null };
@@ -127,7 +137,12 @@ function extractTopicFromObject(topicLike) {
     topicLike.topic_score,
     topicLike.topic_probability,
     topicLike.topicScore,
-    topicLike.topicProbability
+    topicLike.topicProbability,
+    topicLike.confidence,
+    topicLike.conf,
+    topicLike.prob,
+    topicLike.pct,
+    topicLike.topicProb
   );
 
   return { label, score };
@@ -153,6 +168,12 @@ function extractTopicFromParagraph(paragraph) {
   let firstTopicItem = null;
   if (safe.topics && typeof safe.topics === "object" && Array.isArray(safe.topics.items)) {
     firstTopicItem = safe.topics.items[0];
+  } else if (
+    safe.topics &&
+    typeof safe.topics === "object" &&
+    Array.isArray(safe.topics.predictions)
+  ) {
+    firstTopicItem = safe.topics.predictions[0];
   } else if (Array.isArray(safe.topics)) {
     firstTopicItem = safe.topics[0];
   }
@@ -166,16 +187,42 @@ function extractTopicFromParagraph(paragraph) {
       score: firstTopicItem.score,
       topic_score: firstTopicItem.topic_score,
       topic_probability: firstTopicItem.topic_probability,
+      confidence: firstTopicItem.confidence,
+      conf: firstTopicItem.conf,
+      prob: firstTopicItem.prob,
+      pct: firstTopicItem.pct,
+      topicLabel: firstTopicItem.topicLabel,
+      topicProb: firstTopicItem.topicProb,
     });
     if (itemTopic.label) return itemTopic;
   }
 
+  // additional object variants
+  const extraTopicObjects = [
+    safe.topic_info,
+    safe.topic_prediction,
+    safe.topicResult,
+    safe.topic_result,
+  ];
+  for (const topicObj of extraTopicObjects) {
+    const extracted = extractTopicFromObject(topicObj);
+    if (extracted.label) return extracted;
+  }
+
   // 3) paragraph.topic_label + paragraph.topic_score/topic_probability
-  const flatLabel = firstTopicLabel(safe.topic_label);
+  const flatLabel = firstTopicLabel(safe.topic_label, safe.topicLabel);
   if (flatLabel) {
     return {
       label: flatLabel,
-      score: firstTopicScore(safe.topic_score, safe.topic_probability),
+      score: firstTopicScore(
+        safe.topic_score,
+        safe.topic_probability,
+        safe.topicProb,
+        safe.confidence,
+        safe.conf,
+        safe.prob,
+        safe.pct
+      ),
     };
   }
 
@@ -184,7 +231,14 @@ function extractTopicFromParagraph(paragraph) {
   if (camelLabel) {
     return {
       label: camelLabel,
-      score: firstTopicScore(safe.topicScore),
+      score: firstTopicScore(
+        safe.topicScore,
+        safe.topicProb,
+        safe.confidence,
+        safe.conf,
+        safe.prob,
+        safe.pct
+      ),
     };
   }
 
@@ -213,6 +267,10 @@ function extractGlobalTopic(payload) {
       const fromItems = extractTopicFromObject(topicsGlobal.items[0]);
       if (fromItems.label) return fromItems;
     }
+    if (Array.isArray(topicsGlobal.predictions) && topicsGlobal.predictions.length > 0) {
+      const fromPredictions = extractTopicFromObject(topicsGlobal.predictions[0]);
+      if (fromPredictions.label) return fromPredictions;
+    }
   }
   if (Array.isArray(topicsGlobal) && topicsGlobal.length > 0) {
     const fromArray = extractTopicFromObject(topicsGlobal[0]);
@@ -225,6 +283,10 @@ function extractGlobalTopic(payload) {
     if (Array.isArray(topics.items) && topics.items.length > 0) {
       const fromItems = extractTopicFromObject(topics.items[0]);
       if (fromItems.label) return fromItems;
+    }
+    if (Array.isArray(topics.predictions) && topics.predictions.length > 0) {
+      const fromPredictions = extractTopicFromObject(topics.predictions[0]);
+      if (fromPredictions.label) return fromPredictions;
     }
     const direct = extractTopicFromObject(topics);
     if (direct.label) return direct;
@@ -239,7 +301,16 @@ function extractGlobalTopic(payload) {
     if (label) {
       return {
         label,
-        score: firstTopicScore(safe.topic_score, safe.topic_probability, safe.topicScore),
+        score: firstTopicScore(
+          safe.topic_score,
+          safe.topic_probability,
+          safe.topicScore,
+          safe.topicProb,
+          safe.confidence,
+          safe.conf,
+          safe.prob,
+          safe.pct
+        ),
       };
     }
   }
@@ -248,11 +319,26 @@ function extractGlobalTopic(payload) {
     if (fromTopicObject.label) return fromTopicObject;
   }
 
-  const topicLabel = firstTopicLabel(safe.topic_label);
+  const additionalObjects = [safe.topic_info, safe.topic_prediction, safe.topicResult, safe.topic_result];
+  for (const candidate of additionalObjects) {
+    const extracted = extractTopicFromObject(candidate);
+    if (extracted.label) return extracted;
+  }
+
+  const topicLabel = firstTopicLabel(safe.topic_label, safe.topicLabel);
   if (topicLabel) {
     return {
       label: topicLabel,
-      score: firstTopicScore(safe.topic_score, safe.topic_probability, safe.topicScore),
+      score: firstTopicScore(
+        safe.topic_score,
+        safe.topic_probability,
+        safe.topicScore,
+        safe.topicProb,
+        safe.confidence,
+        safe.conf,
+        safe.prob,
+        safe.pct
+      ),
     };
   }
 
@@ -268,6 +354,94 @@ function formatTopicMeta(label, score) {
     return `Topik: ${safeLabel} (skor ${formatPercent(normalizedScore)})`;
   }
   return `Topik: ${safeLabel}`;
+}
+
+function debugTopicSnippet(payload) {
+  const paragraph0 =
+    payload && Array.isArray(payload.paragraphs) && payload.paragraphs.length > 0
+      ? payload.paragraphs[0]
+      : null;
+
+  const candidate =
+    payload?.topic ||
+    payload?.topics ||
+    payload?.topics_global ||
+    payload?.topic_info ||
+    payload?.topic_prediction ||
+    payload?.topicResult ||
+    payload?.topic_result ||
+    paragraph0?.topic ||
+    paragraph0?.topics ||
+    paragraph0?.topic_label ||
+    paragraph0?.topicLabel ||
+    paragraph0?.topic_info ||
+    paragraph0?.topic_prediction ||
+    paragraph0?.topicResult ||
+    paragraph0?.topic_result ||
+    null;
+
+  try {
+    const raw = JSON.stringify(candidate, null, 2);
+    if (!raw) return "null";
+    return raw.length > 1800 ? `${raw.slice(0, 1800)}\n...` : raw;
+  } catch (_err) {
+    return "[topic snippet tidak bisa di-serialize]";
+  }
+}
+
+function getDebugBox() {
+  if (!outputSection || !globalSummary || !isDebug) return null;
+
+  let box = document.getElementById("debugBox");
+  if (!box) {
+    box = document.createElement("pre");
+    box.id = "debugBox";
+    box.className = "debug-box";
+    globalSummary.insertAdjacentElement("afterend", box);
+  }
+  return box;
+}
+
+function clearDebugBox() {
+  const existing = document.getElementById("debugBox");
+  if (existing) existing.remove();
+}
+
+function renderTopicDebug(payload, globalTopic, model) {
+  if (!isDebug) {
+    clearDebugBox();
+    return;
+  }
+
+  const box = getDebugBox();
+  if (!box) return;
+
+  const topKeys =
+    payload && typeof payload === "object" ? Object.keys(payload).sort().slice(0, 80) : [];
+  const paragraph0 =
+    payload && Array.isArray(payload.paragraphs) && payload.paragraphs.length > 0
+      ? payload.paragraphs[0]
+      : null;
+  const paragraph0Keys =
+    paragraph0 && typeof paragraph0 === "object" ? Object.keys(paragraph0).sort().slice(0, 80) : [];
+
+  const hasGlobalTopic = Boolean(cleanTopicLabel(globalTopic?.label));
+  const hasParagraphTopic = Array.isArray(model?.items)
+    ? model.items.some((item) => item.hasTopicLabel)
+    : false;
+  const debugNote =
+    !hasGlobalTopic && !hasParagraphTopic
+      ? "Topik tidak ditemukan pada payload backend."
+      : "Topik terdeteksi dari payload.";
+
+  box.textContent = [
+    "[DEBUG topic]",
+    `payload keys: ${topKeys.join(", ") || "-"}`,
+    `paragraph[0] keys: ${paragraph0Keys.join(", ") || "-"}`,
+    "topic snippet:",
+    debugTopicSnippet(payload),
+    `note: ${debugNote}`,
+  ].join("\n");
 }
 
 function normalizeNewlines(text) {
@@ -428,6 +602,7 @@ function resetOutput() {
   if (outputParagraphs) outputParagraphs.innerHTML = "";
   if (globalSummary) globalSummary.textContent = "";
   if (outputSection) outputSection.classList.add("hidden");
+  clearDebugBox();
 
   if (confidenceList) confidenceList.innerHTML = "";
   if (confidenceSummary) confidenceSummary.textContent = "Rincian Keyakinan";
@@ -716,6 +891,7 @@ function renderOutputInlineWithPayload(payload, paragraphs) {
     outputParagraphs.innerHTML =
       '<p class="paragraph-meta">Tidak ada paragraf yang bisa ditampilkan.</p>';
     outputSection.classList.remove("hidden");
+    renderTopicDebug(payload, globalTopic, model);
     return { model, globalTopic };
   }
 
@@ -748,6 +924,7 @@ function renderOutputInlineWithPayload(payload, paragraphs) {
 
   outputParagraphs.appendChild(fragment);
   outputSection.classList.remove("hidden");
+  renderTopicDebug(payload, globalTopic, model);
 
   return { model, globalTopic };
 }
