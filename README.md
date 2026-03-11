@@ -1,141 +1,105 @@
-<p align="center">
-  <img src="https://img.shields.io/github/stars/fjrmhri/Deteksi_Hoaks?style=for-the-badge&logo=github&color=8b5cf6" alt="Stars"/>
-  <img src="https://img.shields.io/badge/License-MIT-10b981?style=for-the-badge" alt="License"/>
-  <img src="https://img.shields.io/badge/FastAPI-0.115.0-009688?style=for-the-badge&logo=fastapi" alt="FastAPI"/>
-  <img src="https://img.shields.io/badge/Transformers-4.57.1-ffcc00?style=for-the-badge&logo=huggingface" alt="Transformers"/>
-  <img src="https://img.shields.io/badge/PyTorch-2.2.0-ee4c2c?style=for-the-badge&logo=pytorch" alt="PyTorch"/>
-</p>
+# Deteksi Hoaks Indonesia
 
-# Deteksi Hoaks Indonesia – IndoBERT Hoax Detector
+Deteksi Hoaks Indonesia adalah sistem end-to-end untuk klasifikasi berita berbahasa Indonesia dengan backbone IndoBERT. Training utama dilakukan di notebook `notebooks/Deteksi_Hoax_V1.ipynb` pada level dokumen, lalu backend FastAPI memecah input multi-paragraf menjadi paragraf dan kalimat untuk analisis inferensi yang lebih rinci, termasuk topik ringan per paragraf dan highlight inline di frontend.
 
-Aplikasi Deteksi Hoaks Indonesia adalah sistem end-to-end berbasis IndoBERT yang mendeteksi apakah sebuah teks berita mengandung indikasi hoaks atau bukan.
+## Fitur Utama
+- Deteksi hoaks tingkat kalimat pada input multi-paragraf dengan model IndoBERT yang sama seperti classifier dokumen.
+- Highlight inline di frontend: merah untuk `Hoaks`, hijau untuk `Fakta`, dan oranye untuk confidence di bawah `65%`.
+- Topik per paragraf berbasis keyword TF-IDF dari backend.
+- Arsitektur deployment sederhana: backend FastAPI untuk Hugging Face Spaces dan frontend statis untuk Vercel.
 
-## Pipeline Singkat
-- Model IndoBERT-base yang di-fine-tune dengan dataset besar hoaks + non-hoaks
-- Backend FastAPI yang berjalan di Hugging Face Spaces
-- Frontend statis (HTML/JS/CSS) yang bisa dideploy ke Vercel
-- Skema risk level berdasarkan probabilitas hoaks: low, medium, high
+## Struktur Repo
+```text
+Deteksi_Hoaks/
+|-- backend/
+|   |-- app.py
+|   |-- Dockerfile
+|   `-- requirements.txt
+|-- dataset/
+|   |-- Summarized_2020+.csv
+|   |-- Summarized_CNN.csv
+|   |-- Summarized_Detik.csv
+|   |-- Summarized_Kompas.csv
+|   `-- Summarized_TurnBackHoax.csv
+|-- notebooks/
+|   `-- Deteksi_Hoax_V1.ipynb
+|-- preview/
+|   |-- confusion-matrix-test.png
+|   `-- confusion-matrix-validation.png
+|-- public/
+|   |-- app.js
+|   |-- index.html
+|   `-- styles.css
+|-- DOCUMENTATION.md
+|-- README.md
+|-- vercel.json
+|-- package.json
+`-- LICENSE
+```
 
-## Arsitektur Sistem
-User → Frontend (Vercel) → FastAPI (HuggingFace Spaces) → IndoBERT Model → Prediksi
+## Dataset
+Dataset training berada di folder `dataset/` dan dipakai oleh `notebooks/Deteksi_Hoax_V1.ipynb`.
 
-## Komponen
-- Model: indolem/indobert-base-uncased (fine-tuned)
-- Endpoint utama: `/predict`
-- Output: label, probabilitas, dan risk level
+- `dataset/Summarized_CNN.csv`: berita sumber `cnn`; dipetakan sebagai non-hoaks saat kolom `hoax` kosong (notebook cell 3-4).
+- `dataset/Summarized_Detik.csv`: berita sumber `detik`; dipetakan sebagai non-hoaks saat kolom `hoax` kosong (notebook cell 3-4).
+- `dataset/Summarized_Kompas.csv`: berita sumber `kompas`; dipetakan sebagai non-hoaks saat kolom `hoax` kosong (notebook cell 3-4).
+- `dataset/Summarized_TurnBackHoax.csv`: data sumber `turnbackhoax`; dipetakan sebagai hoaks saat kolom `hoax` kosong (notebook cell 3-4).
+- `dataset/Summarized_2020+.csv`: data tambahan `merged_extra`; memiliki kolom ekstra `source_file` dan dipetakan sebagai non-hoaks saat kolom `hoax` kosong (notebook cell 3-4, output cell 9).
 
-## Dataset & Pipeline Data
-### Dataset yang Digunakan
-**Non-hoaks:**
-- Summarized_CNN.csv
-- Summarized_Detik.csv
-- Summarized_Kompas.csv
-- Summarized_2020+
+Catatan label dan teks training:
+- Notebook menyelaraskan kolom ke skema standar `url`, `judul`, `tanggal`, `isi_berita`, `Narasi`, `Clean Narasi`, `hoax`, `summary` (cell 3).
+- Teks training dipilih dengan prioritas `Clean Narasi -> Narasi -> isi_berita -> judul`, lalu disimpan ke kolom `text` (cell 4).
 
-**Hoaks:**
-- Summarized_TurnBackHoax.csv (berisi narasi hoaks & debunk)
+## Cara Menjalankan
 
-Setelah diselaraskan, skema final dataset:
-- url
-- judul
-- tanggal
-- isi_berita
-- Narasi
-- Clean Narasi
-- hoax   (0=non-hoaks, 1=hoaks)
-- summary
+### 1. Training di Google Colab
+Gunakan `notebooks/Deteksi_Hoax_V1.ipynb`.
 
-## Cleaning dan Merging Data
-### Cleaning teks (Clean Narasi)
-Pipeline:
-- lowercase
-- hapus HTML tags
-- hapus URL
-- hapus emoji, simbol, angka tidak penting
-- normalize repeated characters ("hebooooh" → "heboh")
-- stopwords removal
-- stemming ringan (Bahasa Indonesia)
-- slang normalization (yg→yang, gk→nggak, dll)
-- spell correction ringan
-- trim whitespace
-- Jika suatu sumber tidak punya kolom tertentu, diisi "".
+1. Buka notebook di Google Colab dan aktifkan runtime GPU jika tersedia.
+2. Pastikan lima file CSV tersedia di `/content/dataset/` karena `Config` notebook menunjuk ke path itu (cell 1).
+3. Untuk mengambil dataset otomatis, jalankan cell 2 yang mengunduh Kaggle dataset `fjrmhri/dataset-berita` lalu menyalin file ke `/content/dataset/`.
+4. Jika tidak memakai KaggleHub, upload file CSV secara manual atau mount Google Drive lalu copy file ke `/content/dataset/`.
+5. Jalankan cell 0-11 untuk instal dependensi, load data, preprocessing, split, training, evaluasi, dan menyimpan model.
+6. Jalankan cell 12 bila ingin mengunduh zip artefak model.
+7. Jalankan cell 18 bila ingin mengunggah artefak ke Hugging Face; token dibaca dari Colab Secrets `HF_TOKEN`, bukan ditulis di notebook.
 
-### Merging
-- Semua CSV dibaca
-- Kolom dirapikan
-- Dedup berdasarkan (url, judul, Clean Narasi)
-- Buang baris kosong
-- Buang sebagian NaT (agar dataset lebih kecil & bersih)
+### 2. Backend ke Hugging Face Spaces (Docker)
+Backend ada di folder `backend/`.
 
-## Filter Tanggal & Ukuran Dataset
-Dataset besar difilter:
-- Semua tanggal < 2020 dibuang
-- NaT dikurangi 50% secara random
+1. Gunakan isi folder `backend/` sebagai root Space Docker, atau build lokal dengan context folder itu:
+   ```bash
+   docker build -f backend/Dockerfile backend
+   ```
+2. `backend/Dockerfile` menjalankan `uvicorn app:app --host 0.0.0.0 --port 7860` dan `backend/requirements.txt` memasang dependency FastAPI, Transformers, Torch, NumPy, Accelerate, Pydantic, dan scikit-learn.
+3. Env var penting di backend:
+   - `MODEL_ID` default `fjrmhri/TA-FINAL`
+   - `MODEL_SUBFOLDER` default kosong
+   - `MAX_LENGTH` default `256`
+   - `PREDICT_BATCH_SIZE` default `64`
+   - `SENTENCE_BATCH_SIZE` default `64`
+   - `HOAX_THRESH_HIGH` default `0.98`
+   - `HOAX_THRESH_MED` default `0.60`
+   - `SENTENCE_AMBER_CONF` default `0.70`
+4. Verifikasi `GET /health` dan `POST /analyze` setelah deploy.
 
-Contoh perubahan ukuran:
-- Sebelum filter: 196.928 baris
-- Setelah filter: 112.081 baris
-- File final ~127MB
+### 3. Frontend ke Vercel
+Frontend statis ada di folder `public/`.
 
-## Dataset Split & Balancing
-Split:
-- Train: 70%
-- Val: 15%
-- Test: 15%
+1. `package.json` memakai build command `npm run build` untuk menyalin `public/` ke `dist/`.
+2. `vercel.json` mengarahkan Vercel ke hasil build `dist` melalui `@vercel/static-build`.
+3. URL backend default sudah di-hardcode di `public/app.js` sebagai `https://fjrmhri-ta-final-space.hf.space`.
+4. Jika ingin mengganti backend tanpa mengubah kode, gunakan query string `?api=https://your-backend.example` atau set `window.__HOAX_API_BASE_URL__` sebelum `app.js` dimuat.
 
-Sebelum balancing (train):
-- non-hoax: 114.987
-- hoax: 8.367
+## API Singkat
+- `GET /health` -> health check sederhana: `{ "status": "ok" }`
+- `POST /analyze` -> menerima `{ "text": "..." }` dan mengembalikan hasil level dokumen, daftar paragraf, daftar kalimat, topik per paragraf, dan metadata model.
 
-Setelah balancing:
-- non-hoax: 114.987
-- hoax: 114.987
+## Artefak Hugging Face
+- Repo model hasil training: [https://huggingface.co/fjrmhri/TA-FINAL](https://huggingface.co/fjrmhri/TA-FINAL)
+  - Sumber: notebook cell 18 (`id_repositori_target = "fjrmhri/TA-FINAL"`) dan default `MODEL_ID` di `backend/app.py`.
+- Folder lokal yang diunggah: `indobert_hoax_model_v3` (notebook cell 1, 11, 18).
+- Repo topik terpisah: tidak ada di file repo ini; topik dihitung saat runtime dengan TF-IDF keyword, bukan dimuat dari repo model lain.
+- Halaman repo Hugging Face Space: `UNKNOWN (slug repo Space tidak tertulis di file; yang tersedia hanya runtime URL default https://fjrmhri-ta-final-space.hf.space di public/app.js)`
 
-Val dan Test tidak di-balancing.
-
-## Training Model IndoBERT
-### Model & Tokenizer
-- Model: indolem/indobert-base-uncased
-- Max length: 256
-- padding: max_length
-- truncation: true
-
-### Hyperparameter
-- batch_size = 64
-- eval_batch_size = 256
-- gradient_accumulation = 2
-- learning_rate = 2e-5
-- weight_decay = 0.01
-- epochs = 3
-- seed = 42
-- load_best_model_at_end = True
-
-Training berjalan ±2 jam di GPU T4.
-
-### Training Summary
-- steps: 3594
-- final training loss ≈ 0.0085
-- best checkpoint: checkpoint-3594
-
-## Hasil Evaluasi Model
-### Validation Set
-- Accuracy: 0.9983
-- Precision hoax: 0.9921
-- Recall hoax: 0.9833
-- F1 hoax: 0.9877
-- Confusion Matrix – Validation:
-<img src="preview/confusion-matrix-validation.png">
-
-### Test Set
-- Accuracy: 0.9983
-- Precision hoax: 0.9938
-- Recall hoax: 0.9810
-- F1 hoax: 0.9874
-- Confusion Matrix – Test:
-<img src="preview/confusion-matrix-test.png">
-
-## Dokumentasi
-Untuk dokumentasi lengkap dan panduan pengembangan, silakan lihat **[DOCUMENTATION.md](DOCUMENTATION.md)**.
-
-## Aset
-Semua gambar dan ilustrasi berada di folder `preview/` sesuai permintaan proyek.
+## Lisensi
+Project ini memakai lisensi MIT. Lihat `LICENSE`.
