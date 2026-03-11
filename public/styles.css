@@ -103,6 +103,38 @@ textarea:focus {
   font-size: 0.86rem;
 }
 
+.legend-note {
+  margin: 0.6rem 0 0;
+  color: var(--muted);
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.legend {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.16rem 0.5rem;
+  font-size: 0.76rem;
+  font-weight: 700;
+  vertical-align: middle;
+}
+
+.legend--green {
+  background: var(--hl-green-bg);
+  color: var(--hl-green-text);
+}
+
+.legend--red {
+  background: var(--hl-red-bg);
+  color: var(--hl-red-text);
+}
+
+.legend--orange {
+  background: var(--hl-orange-bg);
+  color: var(--hl-orange-text);
+}
+
 .btn {
   border: 0;
   border-radius: 10px;
@@ -255,13 +287,74 @@ button:disabled {
 
 .confidence-list {
   margin: 0;
-  padding-left: 1.15rem;
+  padding: 0;
+  list-style: none;
   display: grid;
-  gap: 0.45rem;
+  gap: 0.6rem;
 }
 
-.confidence-list li {
-  font-size: 0.88rem;
+.confidence-item {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.65rem 0.75rem;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfefd 100%);
+}
+
+.confidence-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.confidence-pos {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.confidence-badge {
+  border-radius: 999px;
+  padding: 0.14rem 0.48rem;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.confidence-badge.badge--green {
+  background: var(--hl-green-bg);
+  color: var(--hl-green-text);
+}
+
+.confidence-badge.badge--red {
+  background: var(--hl-red-bg);
+  color: var(--hl-red-text);
+}
+
+.confidence-badge.badge--orange {
+  background: var(--hl-orange-bg);
+  color: var(--hl-orange-text);
+}
+
+.confidence-metrics {
+  margin-top: 0.45rem;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.35rem;
+  font-size: 0.8rem;
+  color: #2e4e47;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono",
+    monospace;
+}
+
+.confidence-metric {
+  padding: 0.22rem 0.35rem;
+  border-radius: 8px;
+  background: #f4f8f6;
+}
+
+.confidence-text {
+  margin: 0.5rem 0 0;
+  font-size: 0.87rem;
   color: #36574f;
   line-height: 1.55;
   word-break: break-word;
@@ -288,5 +381,14 @@ button:disabled {
   .input-stats {
     gap: 0.55rem;
     font-size: 0.82rem;
+  }
+
+  .confidence-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .confidence-metrics {
+    grid-template-columns: 1fr;
   }
 }

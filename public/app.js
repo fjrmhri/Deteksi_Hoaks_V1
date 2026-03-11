@@ -169,6 +169,18 @@ function kelasHighlight(label, confidence, cutoff = CONFIDENCE_CUTOFF) {
   return "hl--orange";
 }
 
+function badgeClass(label, confidence, cutoff = CONFIDENCE_CUTOFF) {
+  const conf = Number(confidence);
+  if (Number.isFinite(conf) && conf < cutoff) return "badge--orange";
+  return normalizeLabel(label) === "hoaks" ? "badge--red" : "badge--green";
+}
+
+function badgeText(label, confidence, cutoff = CONFIDENCE_CUTOFF) {
+  const conf = Number(confidence);
+  if (Number.isFinite(conf) && conf < cutoff) return "Ragu";
+  return normalizeLabel(label) === "hoaks" ? "Hoaks" : "Fakta";
+}
+
 function getSentenceHoaxProbability(sentence) {
   if (Number.isFinite(Number(sentence?.hoax_probability))) {
     return Number(sentence.hoax_probability);
@@ -444,15 +456,20 @@ function prepareParagraphModel(paragraphs) {
     });
 
     const topicLabelRaw = paragraph?.topic?.label;
-    const topicLabel =
-      typeof topicLabelRaw === "string" && topicLabelRaw.trim() ? topicLabelRaw.trim() : "-";
+    const topicLabelCandidate =
+      typeof topicLabelRaw === "string" ? topicLabelRaw.trim() : "";
+    const hasTopicLabel = Boolean(topicLabelCandidate) && topicLabelCandidate !== "-";
+    const topicLabel = hasTopicLabel ? topicLabelCandidate : "-";
     const topicScore = Number(paragraph?.topic?.score);
+    const hasTopicScore = hasTopicLabel && Number.isFinite(topicScore) && topicScore > 0;
 
     items.push({
       paragraphNumber,
       paragraphLabel,
       topicLabel,
       topicScore,
+      hasTopicLabel,
+      hasTopicScore,
       paragraphText: String(paragraph?.text ?? ""),
       sentences,
     });
@@ -500,13 +517,16 @@ function renderOutputInline(paragraphs) {
     const block = document.createElement("article");
     block.className = "paragraph-block";
 
-    const topicScoreText = Number.isFinite(item.topicScore)
-      ? ` (skor ${formatPercent(item.topicScore)})`
-      : "";
+    let topicMetaText = "Topik: -";
+    if (item.hasTopicLabel && item.hasTopicScore) {
+      topicMetaText = `Topik: ${item.topicLabel} (skor ${formatPercent(item.topicScore)})`;
+    } else if (item.hasTopicLabel) {
+      topicMetaText = `Topik: ${item.topicLabel}`;
+    }
 
     const meta = document.createElement("p");
     meta.className = "paragraph-meta";
-    meta.textContent = `Paragraf ${item.paragraphNumber} • Topik: ${item.topicLabel}${topicScoreText}`;
+    meta.textContent = `Paragraf ${item.paragraphNumber} • ${topicMetaText}`;
 
     const text = document.createElement("p");
     text.className = "paragraph-text";
@@ -557,8 +577,6 @@ function renderConfidenceDetails(paragraphs) {
         ? Number(sentence.sentence_index) + 1
         : sIdx + 1;
 
-      const normalized = normalizeLabel(sentence?.label);
-      const label = labelText(normalized);
       const confidence = Number(sentence?.confidence);
       const pHoax = getSentenceHoaxProbability(sentence);
       const pFakta = getSentenceFaktaProbability(sentence);
@@ -567,11 +585,49 @@ function renderConfidenceDetails(paragraphs) {
       const shortText = truncate(fullText, DETAIL_TEXT_MAX_LEN);
 
       const li = document.createElement("li");
+      li.className = "confidence-item";
       li.title = fullText || "(teks kosong)";
-      li.textContent =
-        `P${item.paragraphNumber} S${sentenceNumber} | "${shortText}" | ${label} | ` +
-        `confidence ${formatPercent(confidence)} | P(hoaks) ${formatPercent(pHoax)} | ` +
-        `P(fakta) ${formatPercent(pFakta)}`;
+
+      const head = document.createElement("div");
+      head.className = "confidence-head";
+
+      const pos = document.createElement("span");
+      pos.className = "confidence-pos";
+      pos.textContent = `P${item.paragraphNumber} S${sentenceNumber}`;
+
+      const badge = document.createElement("span");
+      badge.className = `confidence-badge ${badgeClass(sentence?.label, confidence)}`;
+      badge.textContent = badgeText(sentence?.label, confidence);
+
+      head.appendChild(pos);
+      head.appendChild(badge);
+
+      const metrics = document.createElement("div");
+      metrics.className = "confidence-metrics";
+
+      const metricConfidence = document.createElement("span");
+      metricConfidence.className = "confidence-metric";
+      metricConfidence.textContent = `Confidence ${formatPercent(confidence)}`;
+
+      const metricHoax = document.createElement("span");
+      metricHoax.className = "confidence-metric";
+      metricHoax.textContent = `P(hoaks) ${formatPercent(pHoax)}`;
+
+      const metricFakta = document.createElement("span");
+      metricFakta.className = "confidence-metric";
+      metricFakta.textContent = `P(fakta) ${formatPercent(pFakta)}`;
+
+      metrics.appendChild(metricConfidence);
+      metrics.appendChild(metricHoax);
+      metrics.appendChild(metricFakta);
+
+      const sentenceText = document.createElement("p");
+      sentenceText.className = "confidence-text";
+      sentenceText.textContent = shortText || "(teks kosong)";
+
+      li.appendChild(head);
+      li.appendChild(metrics);
+      li.appendChild(sentenceText);
       fragment.appendChild(li);
     });
   });
