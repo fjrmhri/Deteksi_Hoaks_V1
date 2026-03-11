@@ -187,11 +187,20 @@ button:disabled {
   line-height: 1.74;
 }
 
+.global-summary {
+  margin: 0 0 0.7rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+  font-weight: 600;
+}
+
 .hl {
   display: inline;
   border-radius: 7px;
   padding: 0.08rem 0.28rem;
-  margin-right: 0.14rem;
+  margin-right: 0;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
 }
 
 .hl--green {

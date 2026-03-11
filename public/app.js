@@ -49,6 +49,7 @@ const newsText = document.getElementById("newsText");
 
 const errorBox = document.getElementById("errorBox");
 const outputSection = document.getElementById("outputSection");
+const globalSummary = document.getElementById("globalSummary");
 const outputParagraphs = document.getElementById("outputParagraphs");
 const confidenceDetails = document.getElementById("confidenceDetails");
 const confidenceSummary = document.getElementById("confidenceSummary");
@@ -67,6 +68,13 @@ function formatPercent(value) {
   const n = Number(value);
   if (!Number.isFinite(n)) return "0.00%";
   return `${(n * 100).toFixed(2)}%`;
+}
+
+function normalizeInputForBackend(text) {
+  const raw = String(text || "").replace(/\r\n?/g, "\n");
+  if (!raw.includes("\n")) return raw;
+  if (/\n\s*\n/.test(raw)) return raw;
+  return raw.replace(/\n+/g, "\n\n");
 }
 
 function normalizeLabel(rawLabel) {
@@ -106,29 +114,173 @@ function kelasHighlight(label, confidence, cutoff = 0.65) {
   return "hl--orange";
 }
 
+function sortBySentenceIndex(sentences) {
+  const safeSentences = Array.isArray(sentences) ? [...sentences] : [];
+  safeSentences.sort((a, b) => {
+    const ai = Number.isFinite(Number(a?.sentence_index)) ? Number(a.sentence_index) : 0;
+    const bi = Number.isFinite(Number(b?.sentence_index)) ? Number(b.sentence_index) : 0;
+    return ai - bi;
+  });
+  return safeSentences;
+}
+
+function sortByParagraphIndex(paragraphs) {
+  const safeParagraphs = Array.isArray(paragraphs) ? [...paragraphs] : [];
+  safeParagraphs.sort((a, b) => {
+    const ai = Number.isFinite(Number(a?.paragraph_index)) ? Number(a.paragraph_index) : 0;
+    const bi = Number.isFinite(Number(b?.paragraph_index)) ? Number(b.paragraph_index) : 0;
+    return ai - bi;
+  });
+  return safeParagraphs;
+}
+
+function computeParagraphLabel(sentences, fallbackLabel = "") {
+  const safeSentences = Array.isArray(sentences) ? sentences : [];
+
+  const hasHoaxSentence = safeSentences.some(
+    (sentence) => normalizeLabel(sentence?.label) === "hoaks"
+  );
+
+  if (hasHoaxSentence) return "hoaks";
+
+  if (safeSentences.length === 0 && normalizeLabel(fallbackLabel) === "hoaks") {
+    return "hoaks";
+  }
+
+  return "fakta";
+}
+
+function computeOverallLabel(paragraphs) {
+  const safeParagraphs = Array.isArray(paragraphs) ? paragraphs : [];
+  const hasHoaxParagraph = safeParagraphs.some((paragraph) => {
+    const value = paragraph?.paragraphLabel || paragraph?.label;
+    return normalizeLabel(value) === "hoaks";
+  });
+  return hasHoaxParagraph ? "hoaks" : "fakta";
+}
+
 function getSentenceHoaxProbability(sentence) {
   if (Number.isFinite(Number(sentence?.hoax_probability))) {
     return Number(sentence.hoax_probability);
   }
-  if (sentence?.probabilities && Number.isFinite(Number(sentence.probabilities.hoax))) {
-    return Number(sentence.probabilities.hoax);
-  }
-  if (sentence?.probabilities && Number.isFinite(Number(sentence.probabilities.Hoax))) {
-    return Number(sentence.probabilities.Hoax);
-  }
+
+  const probs = sentence?.probabilities || {};
+  if (Number.isFinite(Number(probs.hoax))) return Number(probs.hoax);
+  if (Number.isFinite(Number(probs.Hoax))) return Number(probs.Hoax);
+
   return 0;
 }
 
 function getSentenceFaktaProbability(sentence) {
   const probs = sentence?.probabilities || {};
-  if (Number.isFinite(Number(probs.not_hoax))) {
-    return Number(probs.not_hoax);
-  }
-  if (Number.isFinite(Number(probs.fakta))) {
-    return Number(probs.fakta);
-  }
+  if (Number.isFinite(Number(probs.not_hoax))) return Number(probs.not_hoax);
+  if (Number.isFinite(Number(probs.fakta))) return Number(probs.fakta);
+
   const pHoax = getSentenceHoaxProbability(sentence);
   return Math.max(0, Math.min(1, 1 - pHoax));
+}
+
+function needsSoftSpace(prevRawText, nextRawText) {
+  if (!prevRawText || !nextRawText) return false;
+  if (/\s$/.test(prevRawText)) return false;
+  if (/^\s/.test(nextRawText)) return false;
+  if (/^[,.;:!?)]/.test(nextRawText)) return false;
+  return true;
+}
+
+function joinHighlightedSentences(sentences) {
+  const safeSentences = sortBySentenceIndex(sentences);
+  const chunks = [];
+
+  safeSentences.forEach((sentence) => {
+    const rawText = String(sentence?.text ?? "");
+    if (rawText === "") return;
+
+    const normalized = normalizeLabel(sentence?.label);
+    const confidence = Number(sentence?.confidence);
+    const highlightClass = kelasHighlight(normalized, confidence, 0.65);
+    const tooltip = `${labelText(normalized)} | confidence ${formatPercent(confidence)}`;
+
+    chunks.push({
+      rawText,
+      html: `<span class="hl ${highlightClass}" title="${escapeHtml(tooltip)}">${escapeHtml(
+        rawText
+      )}</span>`,
+    });
+  });
+
+  if (chunks.length === 0) return "";
+
+  let html = "";
+  for (let i = 0; i < chunks.length; i += 1) {
+    const current = chunks[i];
+    const previous = i > 0 ? chunks[i - 1] : null;
+
+    if (previous && needsSoftSpace(previous.rawText, current.rawText)) {
+      html += " ";
+    }
+    html += current.html;
+  }
+
+  return html;
+}
+
+function prepareParagraphModel(paragraphs) {
+  const items = [];
+  const sortedParagraphs = sortByParagraphIndex(paragraphs);
+
+  let sentenceCount = 0;
+  let paragraphHoaks = 0;
+  let paragraphFakta = 0;
+  let raguSentences = 0;
+
+  sortedParagraphs.forEach((paragraph, index) => {
+    const paragraphNumber = Number.isFinite(Number(paragraph?.paragraph_index))
+      ? Number(paragraph.paragraph_index) + 1
+      : index + 1;
+
+    const sentences = sortBySentenceIndex(paragraph?.sentences);
+    const paragraphLabel = computeParagraphLabel(sentences, paragraph?.label);
+
+    if (paragraphLabel === "hoaks") paragraphHoaks += 1;
+    else paragraphFakta += 1;
+
+    sentenceCount += sentences.length;
+    sentences.forEach((sentence) => {
+      const conf = Number(sentence?.confidence);
+      if (Number.isFinite(conf) && conf < 0.65) {
+        raguSentences += 1;
+      }
+    });
+
+    const topicLabelRaw = paragraph?.topic?.label;
+    const topicLabel =
+      typeof topicLabelRaw === "string" && topicLabelRaw.trim() ? topicLabelRaw.trim() : "-";
+    const topicScore = Number(paragraph?.topic?.score);
+
+    items.push({
+      paragraphNumber,
+      paragraphLabel,
+      topicLabel,
+      topicScore,
+      paragraphText: String(paragraph?.text ?? ""),
+      sentences,
+    });
+  });
+
+  const overallLabel = computeOverallLabel(items);
+
+  return {
+    items,
+    counts: {
+      paragraphCount: items.length,
+      sentenceCount,
+      paragraphHoaks,
+      paragraphFakta,
+      raguSentences,
+    },
+    overallLabel,
+  };
 }
 
 function showError(message) {
@@ -161,6 +313,7 @@ function setLoading(isLoading) {
 
 function resetOutput() {
   if (outputParagraphs) outputParagraphs.innerHTML = "";
+  if (globalSummary) globalSummary.textContent = "";
   if (outputSection) outputSection.classList.add("hidden");
 
   if (confidenceList) confidenceList.innerHTML = "";
@@ -218,75 +371,50 @@ function extractParagraphs(payload) {
 }
 
 function renderOutputInline(paragraphs) {
-  if (!outputSection || !outputParagraphs) return;
+  if (!outputSection || !outputParagraphs || !globalSummary) {
+    return null;
+  }
 
   outputParagraphs.innerHTML = "";
 
-  if (!Array.isArray(paragraphs) || paragraphs.length === 0) {
+  const model = prepareParagraphModel(paragraphs);
+
+  globalSummary.textContent =
+    `Ringkasan: ${labelText(model.overallLabel)} • ${model.counts.paragraphCount} paragraf • ` +
+    `${model.counts.sentenceCount} kalimat • Hoaks ${model.counts.paragraphHoaks} • ` +
+    `Fakta ${model.counts.paragraphFakta} • Ragu ${model.counts.raguSentences}`;
+
+  if (model.items.length === 0) {
     outputParagraphs.innerHTML =
       '<p class="paragraph-meta">Tidak ada paragraf yang bisa ditampilkan.</p>';
     outputSection.classList.remove("hidden");
-    return;
+    return model;
   }
-
-  const sortedParagraphs = [...paragraphs].sort((a, b) => {
-    const ai = Number.isFinite(Number(a?.paragraph_index)) ? Number(a.paragraph_index) : 0;
-    const bi = Number.isFinite(Number(b?.paragraph_index)) ? Number(b.paragraph_index) : 0;
-    return ai - bi;
-  });
 
   const fragment = document.createDocumentFragment();
 
-  sortedParagraphs.forEach((paragraph, index) => {
-    const paragraphIndex = Number.isFinite(Number(paragraph?.paragraph_index))
-      ? Number(paragraph.paragraph_index) + 1
-      : index + 1;
-
-    const topicLabelRaw = paragraph?.topic?.label;
-    const topicLabel =
-      typeof topicLabelRaw === "string" && topicLabelRaw.trim() ? topicLabelRaw.trim() : "-";
-    const topicScore = Number(paragraph?.topic?.score);
-    const topicScoreText = Number.isFinite(topicScore)
-      ? ` (skor ${formatPercent(topicScore)})`
-      : "";
-
-    const sentences = Array.isArray(paragraph?.sentences) ? [...paragraph.sentences] : [];
-    sentences.sort((a, b) => {
-      const ai = Number.isFinite(Number(a?.sentence_index)) ? Number(a.sentence_index) : 0;
-      const bi = Number.isFinite(Number(b?.sentence_index)) ? Number(b.sentence_index) : 0;
-      return ai - bi;
-    });
-
+  model.items.forEach((item) => {
     const block = document.createElement("article");
     block.className = "paragraph-block";
 
+    const topicScoreText = Number.isFinite(item.topicScore)
+      ? ` (skor ${formatPercent(item.topicScore)})`
+      : "";
+
     const meta = document.createElement("p");
     meta.className = "paragraph-meta";
-    meta.textContent = `Paragraf ${paragraphIndex} • Topik: ${topicLabel}${topicScoreText}`;
+    meta.textContent =
+      `Paragraf ${item.paragraphNumber} • Topik: ${item.topicLabel}${topicScoreText} • ` +
+      `Label paragraf: ${labelText(item.paragraphLabel)}`;
 
     const text = document.createElement("p");
     text.className = "paragraph-text";
 
-    if (sentences.length > 0) {
-      const inlineHtml = sentences
-        .map((sentence) => {
-          const sentenceText = String(sentence?.text || "").trim();
-          if (!sentenceText) return "";
-
-          const normalized = normalizeLabel(sentence?.label);
-          const conf = Number(sentence?.confidence);
-          const hlClass = kelasHighlight(normalized, conf, 0.65);
-          const title = `${labelText(normalized)} | confidence ${formatPercent(conf)}`;
-          return `<span class="hl ${hlClass}" title="${escapeHtml(title)}">${escapeHtml(
-            sentenceText
-          )}</span>`;
-        })
-        .filter(Boolean)
-        .join(" ");
-
-      text.innerHTML = inlineHtml || escapeHtml(String(paragraph?.text || ""));
+    const highlighted = joinHighlightedSentences(item.sentences);
+    if (highlighted) {
+      text.innerHTML = highlighted;
     } else {
-      text.innerHTML = escapeHtml(String(paragraph?.text || ""));
+      text.innerHTML = escapeHtml(item.paragraphText);
     }
 
     block.appendChild(meta);
@@ -296,49 +424,29 @@ function renderOutputInline(paragraphs) {
 
   outputParagraphs.appendChild(fragment);
   outputSection.classList.remove("hidden");
+
+  return model;
 }
 
 function renderConfidenceDetails(paragraphs) {
   if (!confidenceDetails || !confidenceSummary || !confidenceList) return;
 
+  const model = prepareParagraphModel(paragraphs);
   const rows = [];
-  let totalSentences = 0;
-  let totalHoaks = 0;
-  let totalFakta = 0;
-  let totalRagu = 0;
 
-  const safeParagraphs = Array.isArray(paragraphs) ? paragraphs : [];
-
-  safeParagraphs.forEach((paragraph, pIdx) => {
-    const paragraphNumber = Number.isFinite(Number(paragraph?.paragraph_index))
-      ? Number(paragraph.paragraph_index) + 1
-      : pIdx + 1;
-
-    const sentences = Array.isArray(paragraph?.sentences) ? [...paragraph.sentences] : [];
-    sentences.sort((a, b) => {
-      const ai = Number.isFinite(Number(a?.sentence_index)) ? Number(a.sentence_index) : 0;
-      const bi = Number.isFinite(Number(b?.sentence_index)) ? Number(b.sentence_index) : 0;
-      return ai - bi;
-    });
-
-    sentences.forEach((sentence, sIdx) => {
-      totalSentences += 1;
+  model.items.forEach((item) => {
+    item.sentences.forEach((sentence, sIdx) => {
+      const sentenceNumber = Number.isFinite(Number(sentence?.sentence_index))
+        ? Number(sentence.sentence_index) + 1
+        : sIdx + 1;
 
       const normalized = normalizeLabel(sentence?.label);
       const conf = Number(sentence?.confidence);
       const pHoax = getSentenceHoaxProbability(sentence);
       const pFakta = getSentenceFaktaProbability(sentence);
 
-      if (normalized === "hoaks") totalHoaks += 1;
-      if (normalized === "fakta") totalFakta += 1;
-      if (Number.isFinite(conf) && conf < 0.65) totalRagu += 1;
-
-      const sentenceNumber = Number.isFinite(Number(sentence?.sentence_index))
-        ? Number(sentence.sentence_index) + 1
-        : sIdx + 1;
-
       rows.push(
-        `P${paragraphNumber} S${sentenceNumber} | ${labelText(normalized)} | confidence ${formatPercent(
+        `P${item.paragraphNumber} S${sentenceNumber} | ${labelText(normalized)} | confidence ${formatPercent(
           conf
         )} | P(hoaks) ${formatPercent(pHoax)} | P(fakta) ${formatPercent(pFakta)}`
       );
@@ -346,8 +454,8 @@ function renderConfidenceDetails(paragraphs) {
   });
 
   confidenceSummary.textContent =
-    `Rincian Keyakinan • ${safeParagraphs.length} paragraf • ${totalSentences} kalimat • ` +
-    `Hoaks ${totalHoaks} • Fakta ${totalFakta} • Ragu ${totalRagu}`;
+    `Rincian Keyakinan • ${model.counts.paragraphCount} paragraf • ${model.counts.sentenceCount} kalimat • ` +
+    `Hoaks ${model.counts.paragraphHoaks} • Fakta ${model.counts.paragraphFakta} • Ragu ${model.counts.raguSentences}`;
 
   if (rows.length === 0) {
     confidenceList.innerHTML = "<li>Tidak ada rincian confidence yang tersedia.</li>";
@@ -375,15 +483,17 @@ async function handleDetect() {
   clearError();
   resetOutput();
 
-  const text = String(newsText?.value || "").trim();
-  if (!text) {
+  const rawText = String(newsText?.value || "");
+  if (!rawText.trim()) {
     showError("Masukkan teks berita terlebih dahulu.");
     return;
   }
 
+  const textToSend = normalizeInputForBackend(rawText);
+
   setLoading(true);
   try {
-    const payload = await callAnalyzeApi(text);
+    const payload = await callAnalyzeApi(textToSend);
     const paragraphs = extractParagraphs(payload);
 
     renderOutputInline(paragraphs);
