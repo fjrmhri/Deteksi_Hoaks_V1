@@ -26,12 +26,17 @@
           placeholder="Tempel teks berita di sini..."
         ></textarea>
 
+        <div id="inputStats" class="input-stats">
+          <span id="statParagraphs">Paragraf: 0</span>
+          <span id="statSentences">Kalimat: 0</span>
+          <span id="statWords">Kata: 0</span>
+        </div>
+
         <div class="action-row">
           <button id="detectBtn" type="button" class="btn btn-primary">
             <span id="detectLabel">Deteksi</span>
             <span id="detectSpinner" class="spinner hidden" aria-hidden="true"></span>
           </button>
-          <button id="sampleBtn" type="button" class="btn btn-secondary">Isi contoh</button>
           <button id="resetBtn" type="button" class="btn btn-secondary">Reset</button>
         </div>
       </section>

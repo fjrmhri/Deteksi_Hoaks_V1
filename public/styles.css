@@ -94,6 +94,15 @@ textarea:focus {
   flex-wrap: wrap;
 }
 
+.input-stats {
+  margin-top: 0.55rem;
+  display: flex;
+  gap: 0.9rem;
+  flex-wrap: wrap;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
 .btn {
   border: 0;
   border-radius: 10px;
@@ -248,13 +257,14 @@ button:disabled {
   margin: 0;
   padding-left: 1.15rem;
   display: grid;
-  gap: 0.35rem;
+  gap: 0.45rem;
 }
 
 .confidence-list li {
-  font-size: 0.9rem;
-  color: #23453e;
-  line-height: 1.45;
+  font-size: 0.88rem;
+  color: #36574f;
+  line-height: 1.55;
+  word-break: break-word;
 }
 
 .hidden {
@@ -273,5 +283,10 @@ button:disabled {
 
   .action-row .btn {
     flex: 1 1 100%;
+  }
+
+  .input-stats {
+    gap: 0.55rem;
+    font-size: 0.82rem;
   }
 }

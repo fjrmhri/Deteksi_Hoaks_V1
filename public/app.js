@@ -1,11 +1,7 @@
 const DEFAULT_API_BASE_URL = "https://fjrmhri-ta-final-space.hf.space";
 const API_TIMEOUT_MS = 25000;
-
-const SAMPLE_TEXT = `Beredar unggahan media sosial yang menyebut pemerintah membagikan bantuan tunai tanpa syarat melalui tautan tertentu. Unggahan tersebut meminta warga mengirim data pribadi dan OTP agar dana cepat cair.
-
-Kementerian terkait lalu mengeluarkan klarifikasi resmi bahwa informasi tersebut tidak benar. Masyarakat diminta mengecek pengumuman hanya dari situs dan akun pemerintah yang terverifikasi.
-
-Pakar keamanan digital juga mengingatkan bahwa tautan serupa sering dipakai untuk phishing. Warga disarankan tidak membagikan pesan berantai sebelum verifikasi sumber.`;
+const CONFIDENCE_CUTOFF = 0.65;
+const DETAIL_TEXT_MAX_LEN = 190;
 
 function normalizeApiBaseUrl(rawUrl) {
   const raw = String(rawUrl || "").trim();
@@ -43,9 +39,12 @@ const apiBaseUrl = resolveApiBaseUrl();
 const detectBtn = document.getElementById("detectBtn");
 const detectLabel = document.getElementById("detectLabel");
 const detectSpinner = document.getElementById("detectSpinner");
-const sampleBtn = document.getElementById("sampleBtn");
 const resetBtn = document.getElementById("resetBtn");
 const newsText = document.getElementById("newsText");
+
+const statParagraphs = document.getElementById("statParagraphs");
+const statSentences = document.getElementById("statSentences");
+const statWords = document.getElementById("statWords");
 
 const errorBox = document.getElementById("errorBox");
 const outputSection = document.getElementById("outputSection");
@@ -64,17 +63,73 @@ function escapeHtml(text) {
     .replace(/'/g, "&#039;");
 }
 
+function truncate(text, maxLen = DETAIL_TEXT_MAX_LEN) {
+  const raw = String(text || "").trim();
+  if (raw.length <= maxLen) return raw;
+  return `${raw.slice(0, maxLen - 3)}...`;
+}
+
 function formatPercent(value) {
   const n = Number(value);
   if (!Number.isFinite(n)) return "0.00%";
   return `${(n * 100).toFixed(2)}%`;
 }
 
-function normalizeInputForBackend(text) {
-  const raw = String(text || "").replace(/\r\n?/g, "\n");
-  if (!raw.includes("\n")) return raw;
-  if (/\n\s*\n/.test(raw)) return raw;
-  return raw.replace(/\n+/g, "\n\n");
+function normalizeNewlines(text) {
+  return String(text || "").replace(/\r\n?/g, "\n");
+}
+
+function splitParagraphsByBlankLine(text) {
+  return normalizeNewlines(text)
+    .split(/\n\s*\n+/)
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0);
+}
+
+function splitSentencesHeuristic(text) {
+  const raw = String(text || "");
+  const matches = raw.match(/[^.!?]+(?:[.!?]+|$)/g) || [];
+  const cleaned = matches.map((x) => x.trim()).filter((x) => x.length > 0);
+  if (cleaned.length > 0) return cleaned;
+  const fallback = raw.trim();
+  return fallback ? [fallback] : [];
+}
+
+function countParagraphs(text) {
+  return splitParagraphsByBlankLine(text).length;
+}
+
+function countSentences(text) {
+  return splitSentencesHeuristic(text).length;
+}
+
+function countWords(text) {
+  return String(text || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean).length;
+}
+
+function updateInputStats() {
+  const text = String(newsText?.value || "");
+  const p = countParagraphs(text);
+  const s = countSentences(text);
+  const w = countWords(text);
+
+  if (statParagraphs) statParagraphs.textContent = `Paragraf: ${p}`;
+  if (statSentences) statSentences.textContent = `Kalimat: ${s}`;
+  if (statWords) statWords.textContent = `Kata: ${w}`;
+}
+
+function normalizeParagraphBreaks(text) {
+  const normalized = normalizeNewlines(text);
+  if (!normalized.includes("\n")) return normalized;
+
+  if (/\n\s*\n/.test(normalized)) {
+    return normalized;
+  }
+
+  return normalized.replace(/\n+/g, "\n\n");
 }
 
 function normalizeLabel(rawLabel) {
@@ -104,7 +159,7 @@ function labelText(normalizedLabel) {
   return "Tidak diketahui";
 }
 
-function kelasHighlight(label, confidence, cutoff = 0.65) {
+function kelasHighlight(label, confidence, cutoff = CONFIDENCE_CUTOFF) {
   const conf = Number(confidence);
   if (Number.isFinite(conf) && conf < cutoff) return "hl--orange";
 
@@ -112,51 +167,6 @@ function kelasHighlight(label, confidence, cutoff = 0.65) {
   if (normalized === "hoaks") return "hl--red";
   if (normalized === "fakta") return "hl--green";
   return "hl--orange";
-}
-
-function sortBySentenceIndex(sentences) {
-  const safeSentences = Array.isArray(sentences) ? [...sentences] : [];
-  safeSentences.sort((a, b) => {
-    const ai = Number.isFinite(Number(a?.sentence_index)) ? Number(a.sentence_index) : 0;
-    const bi = Number.isFinite(Number(b?.sentence_index)) ? Number(b.sentence_index) : 0;
-    return ai - bi;
-  });
-  return safeSentences;
-}
-
-function sortByParagraphIndex(paragraphs) {
-  const safeParagraphs = Array.isArray(paragraphs) ? [...paragraphs] : [];
-  safeParagraphs.sort((a, b) => {
-    const ai = Number.isFinite(Number(a?.paragraph_index)) ? Number(a.paragraph_index) : 0;
-    const bi = Number.isFinite(Number(b?.paragraph_index)) ? Number(b.paragraph_index) : 0;
-    return ai - bi;
-  });
-  return safeParagraphs;
-}
-
-function computeParagraphLabel(sentences, fallbackLabel = "") {
-  const safeSentences = Array.isArray(sentences) ? sentences : [];
-
-  const hasHoaxSentence = safeSentences.some(
-    (sentence) => normalizeLabel(sentence?.label) === "hoaks"
-  );
-
-  if (hasHoaxSentence) return "hoaks";
-
-  if (safeSentences.length === 0 && normalizeLabel(fallbackLabel) === "hoaks") {
-    return "hoaks";
-  }
-
-  return "fakta";
-}
-
-function computeOverallLabel(paragraphs) {
-  const safeParagraphs = Array.isArray(paragraphs) ? paragraphs : [];
-  const hasHoaxParagraph = safeParagraphs.some((paragraph) => {
-    const value = paragraph?.paragraphLabel || paragraph?.label;
-    return normalizeLabel(value) === "hoaks";
-  });
-  return hasHoaxParagraph ? "hoaks" : "fakta";
 }
 
 function getSentenceHoaxProbability(sentence) {
@@ -180,109 +190,6 @@ function getSentenceFaktaProbability(sentence) {
   return Math.max(0, Math.min(1, 1 - pHoax));
 }
 
-function needsSoftSpace(prevRawText, nextRawText) {
-  if (!prevRawText || !nextRawText) return false;
-  if (/\s$/.test(prevRawText)) return false;
-  if (/^\s/.test(nextRawText)) return false;
-  if (/^[,.;:!?)]/.test(nextRawText)) return false;
-  return true;
-}
-
-function joinHighlightedSentences(sentences) {
-  const safeSentences = sortBySentenceIndex(sentences);
-  const chunks = [];
-
-  safeSentences.forEach((sentence) => {
-    const rawText = String(sentence?.text ?? "");
-    if (rawText === "") return;
-
-    const normalized = normalizeLabel(sentence?.label);
-    const confidence = Number(sentence?.confidence);
-    const highlightClass = kelasHighlight(normalized, confidence, 0.65);
-    const tooltip = `${labelText(normalized)} | confidence ${formatPercent(confidence)}`;
-
-    chunks.push({
-      rawText,
-      html: `<span class="hl ${highlightClass}" title="${escapeHtml(tooltip)}">${escapeHtml(
-        rawText
-      )}</span>`,
-    });
-  });
-
-  if (chunks.length === 0) return "";
-
-  let html = "";
-  for (let i = 0; i < chunks.length; i += 1) {
-    const current = chunks[i];
-    const previous = i > 0 ? chunks[i - 1] : null;
-
-    if (previous && needsSoftSpace(previous.rawText, current.rawText)) {
-      html += " ";
-    }
-    html += current.html;
-  }
-
-  return html;
-}
-
-function prepareParagraphModel(paragraphs) {
-  const items = [];
-  const sortedParagraphs = sortByParagraphIndex(paragraphs);
-
-  let sentenceCount = 0;
-  let paragraphHoaks = 0;
-  let paragraphFakta = 0;
-  let raguSentences = 0;
-
-  sortedParagraphs.forEach((paragraph, index) => {
-    const paragraphNumber = Number.isFinite(Number(paragraph?.paragraph_index))
-      ? Number(paragraph.paragraph_index) + 1
-      : index + 1;
-
-    const sentences = sortBySentenceIndex(paragraph?.sentences);
-    const paragraphLabel = computeParagraphLabel(sentences, paragraph?.label);
-
-    if (paragraphLabel === "hoaks") paragraphHoaks += 1;
-    else paragraphFakta += 1;
-
-    sentenceCount += sentences.length;
-    sentences.forEach((sentence) => {
-      const conf = Number(sentence?.confidence);
-      if (Number.isFinite(conf) && conf < 0.65) {
-        raguSentences += 1;
-      }
-    });
-
-    const topicLabelRaw = paragraph?.topic?.label;
-    const topicLabel =
-      typeof topicLabelRaw === "string" && topicLabelRaw.trim() ? topicLabelRaw.trim() : "-";
-    const topicScore = Number(paragraph?.topic?.score);
-
-    items.push({
-      paragraphNumber,
-      paragraphLabel,
-      topicLabel,
-      topicScore,
-      paragraphText: String(paragraph?.text ?? ""),
-      sentences,
-    });
-  });
-
-  const overallLabel = computeOverallLabel(items);
-
-  return {
-    items,
-    counts: {
-      paragraphCount: items.length,
-      sentenceCount,
-      paragraphHoaks,
-      paragraphFakta,
-      raguSentences,
-    },
-    overallLabel,
-  };
-}
-
 function showError(message) {
   if (!errorBox) return;
   errorBox.textContent = message;
@@ -299,7 +206,6 @@ function setLoading(isLoading) {
   if (!detectBtn || !detectLabel || !detectSpinner) return;
 
   detectBtn.disabled = isLoading;
-  if (sampleBtn) sampleBtn.disabled = isLoading;
   if (resetBtn) resetBtn.disabled = isLoading;
 
   if (isLoading) {
@@ -364,16 +270,212 @@ async function callAnalyzeApi(text) {
   }
 }
 
-function extractParagraphs(payload) {
+function sortByParagraphIndex(paragraphs) {
+  const safe = Array.isArray(paragraphs) ? [...paragraphs] : [];
+  safe.sort((a, b) => {
+    const ai = Number.isFinite(Number(a?.paragraph_index)) ? Number(a.paragraph_index) : 0;
+    const bi = Number.isFinite(Number(b?.paragraph_index)) ? Number(b.paragraph_index) : 0;
+    return ai - bi;
+  });
+  return safe;
+}
+
+function sortBySentenceIndex(sentences) {
+  const safe = Array.isArray(sentences) ? [...sentences] : [];
+  safe.sort((a, b) => {
+    const ai = Number.isFinite(Number(a?.sentence_index)) ? Number(a.sentence_index) : 0;
+    const bi = Number.isFinite(Number(b?.sentence_index)) ? Number(b.sentence_index) : 0;
+    return ai - bi;
+  });
+  return safe;
+}
+
+function computeParagraphLabel(sentences) {
+  const safe = Array.isArray(sentences) ? sentences : [];
+  const hasHoaks = safe.some((sentence) => normalizeLabel(sentence?.label) === "hoaks");
+  return hasHoaks ? "hoaks" : "fakta";
+}
+
+function computeOverallLabel(paragraphs) {
+  const safe = Array.isArray(paragraphs) ? paragraphs : [];
+  const hasHoaks = safe.some((paragraph) => normalizeLabel(paragraph?.paragraphLabel) === "hoaks");
+  return hasHoaks ? "hoaks" : "fakta";
+}
+
+function needsSoftSpace(previousRaw, currentRaw) {
+  if (!previousRaw || !currentRaw) return false;
+  if (/\s$/.test(previousRaw)) return false;
+  if (/^\s/.test(currentRaw)) return false;
+  if (/^[,.;:!?)]/.test(currentRaw)) return false;
+  return true;
+}
+
+function joinHighlightedSentences(sentences) {
+  const ordered = sortBySentenceIndex(sentences);
+  const chunks = [];
+
+  ordered.forEach((sentence) => {
+    const rawText = String(sentence?.text ?? "");
+    if (rawText === "") return;
+
+    const normalized = normalizeLabel(sentence?.label);
+    const confidence = Number(sentence?.confidence);
+    const hlClass = kelasHighlight(normalized, confidence, CONFIDENCE_CUTOFF);
+    const title = `${labelText(normalized)} | confidence ${formatPercent(confidence)}`;
+
+    chunks.push({
+      rawText,
+      html: `<span class="hl ${hlClass}" title="${escapeHtml(title)}">${escapeHtml(
+        rawText
+      )}</span>`,
+    });
+  });
+
+  if (chunks.length === 0) return "";
+
+  let html = "";
+  for (let i = 0; i < chunks.length; i += 1) {
+    const current = chunks[i];
+    const previous = i > 0 ? chunks[i - 1] : null;
+
+    if (previous && needsSoftSpace(previous.rawText, current.rawText)) {
+      html += " ";
+    }
+    html += current.html;
+  }
+
+  return html;
+}
+
+function buildFallbackParagraphs(paragraphsFromBackend, inputTextUsed) {
+  const inputParagraphs = splitParagraphsByBlankLine(inputTextUsed);
+  const backendParagraphs = sortByParagraphIndex(paragraphsFromBackend);
+
+  if (inputParagraphs.length <= 1 || backendParagraphs.length !== 1) {
+    return backendParagraphs;
+  }
+
+  const sourceParagraph = backendParagraphs[0] || {};
+  const sourceSentences = sortBySentenceIndex(sourceParagraph.sentences);
+  const estimatedPerParagraph = inputParagraphs.map((paragraphText) =>
+    splitSentencesHeuristic(paragraphText).length
+  );
+
+  const rebuilt = [];
+  let cursor = 0;
+
+  for (let i = 0; i < inputParagraphs.length; i += 1) {
+    const remainingParagraphs = inputParagraphs.length - i;
+    const remainingSentences = sourceSentences.length - cursor;
+
+    let takeCount = estimatedPerParagraph[i] || 0;
+    if (i === inputParagraphs.length - 1) {
+      takeCount = Math.max(0, remainingSentences);
+    } else {
+      const minReserve = Math.max(0, remainingParagraphs - 1);
+      const maxAllowed = Math.max(0, remainingSentences - minReserve);
+      if (takeCount > maxAllowed) takeCount = maxAllowed;
+      if (takeCount <= 0 && maxAllowed > 0) takeCount = 1;
+    }
+
+    const slice = sourceSentences.slice(cursor, cursor + takeCount).map((sentence, localIdx) => ({
+      ...sentence,
+      sentence_index: localIdx,
+    }));
+    cursor += takeCount;
+
+    rebuilt.push({
+      paragraph_index: i,
+      text: inputParagraphs[i],
+      topic: { label: "-", score: null, keywords: [] },
+      sentences: slice,
+    });
+  }
+
+  if (cursor < sourceSentences.length && rebuilt.length > 0) {
+    const leftovers = sourceSentences.slice(cursor);
+    const lastParagraph = rebuilt[rebuilt.length - 1];
+    lastParagraph.sentences = [...lastParagraph.sentences, ...leftovers].map((sentence, idx) => ({
+      ...sentence,
+      sentence_index: idx,
+    }));
+  }
+
+  return rebuilt;
+}
+
+function extractParagraphs(payload, inputTextUsed) {
   if (!payload || typeof payload !== "object") return [];
   if (!Array.isArray(payload.paragraphs)) return [];
-  return payload.paragraphs;
+
+  const sorted = sortByParagraphIndex(payload.paragraphs);
+  return buildFallbackParagraphs(sorted, inputTextUsed);
+}
+
+function prepareParagraphModel(paragraphs) {
+  const sorted = sortByParagraphIndex(paragraphs);
+  const items = [];
+
+  let sentenceCount = 0;
+  let sentenceHoaksCount = 0;
+  let sentenceFaktaCount = 0;
+  let sentenceRaguCount = 0;
+  let paragraphHoaksCount = 0;
+
+  sorted.forEach((paragraph, index) => {
+    const paragraphNumber = Number.isFinite(Number(paragraph?.paragraph_index))
+      ? Number(paragraph.paragraph_index) + 1
+      : index + 1;
+
+    const sentences = sortBySentenceIndex(paragraph?.sentences);
+    const paragraphLabel = computeParagraphLabel(sentences);
+    if (paragraphLabel === "hoaks") paragraphHoaksCount += 1;
+
+    sentences.forEach((sentence) => {
+      sentenceCount += 1;
+      const normalized = normalizeLabel(sentence?.label);
+      if (normalized === "hoaks") sentenceHoaksCount += 1;
+      else sentenceFaktaCount += 1;
+
+      const confidence = Number(sentence?.confidence);
+      if (Number.isFinite(confidence) && confidence < CONFIDENCE_CUTOFF) {
+        sentenceRaguCount += 1;
+      }
+    });
+
+    const topicLabelRaw = paragraph?.topic?.label;
+    const topicLabel =
+      typeof topicLabelRaw === "string" && topicLabelRaw.trim() ? topicLabelRaw.trim() : "-";
+    const topicScore = Number(paragraph?.topic?.score);
+
+    items.push({
+      paragraphNumber,
+      paragraphLabel,
+      topicLabel,
+      topicScore,
+      paragraphText: String(paragraph?.text ?? ""),
+      sentences,
+    });
+  });
+
+  const overallLabel = computeOverallLabel(items);
+
+  return {
+    items,
+    overallLabel,
+    counts: {
+      paragraphCount: items.length,
+      sentenceCount,
+      sentenceHoaksCount,
+      sentenceFaktaCount,
+      sentenceRaguCount,
+      paragraphHoaksCount,
+    },
+  };
 }
 
 function renderOutputInline(paragraphs) {
-  if (!outputSection || !outputParagraphs || !globalSummary) {
-    return null;
-  }
+  if (!outputSection || !outputParagraphs || !globalSummary) return null;
 
   outputParagraphs.innerHTML = "";
 
@@ -381,8 +483,9 @@ function renderOutputInline(paragraphs) {
 
   globalSummary.textContent =
     `Ringkasan: ${labelText(model.overallLabel)} • ${model.counts.paragraphCount} paragraf • ` +
-    `${model.counts.sentenceCount} kalimat • Hoaks ${model.counts.paragraphHoaks} • ` +
-    `Fakta ${model.counts.paragraphFakta} • Ragu ${model.counts.raguSentences}`;
+    `${model.counts.sentenceCount} kalimat • Hoaks ${model.counts.sentenceHoaksCount} • ` +
+    `Fakta ${model.counts.sentenceFaktaCount} • Ragu ${model.counts.sentenceRaguCount} • ` +
+    `Paragraf Hoaks ${model.counts.paragraphHoaksCount}`;
 
   if (model.items.length === 0) {
     outputParagraphs.innerHTML =
@@ -403,9 +506,7 @@ function renderOutputInline(paragraphs) {
 
     const meta = document.createElement("p");
     meta.className = "paragraph-meta";
-    meta.textContent =
-      `Paragraf ${item.paragraphNumber} • Topik: ${item.topicLabel}${topicScoreText} • ` +
-      `Label paragraf: ${labelText(item.paragraphLabel)}`;
+    meta.textContent = `Paragraf ${item.paragraphNumber} • Topik: ${item.topicLabel}${topicScoreText}`;
 
     const text = document.createElement("p");
     text.className = "paragraph-text";
@@ -432,7 +533,23 @@ function renderConfidenceDetails(paragraphs) {
   if (!confidenceDetails || !confidenceSummary || !confidenceList) return;
 
   const model = prepareParagraphModel(paragraphs);
-  const rows = [];
+
+  confidenceSummary.textContent =
+    `Rincian Keyakinan • ${model.counts.paragraphCount} paragraf • ${model.counts.sentenceCount} kalimat • ` +
+    `Hoaks ${model.counts.sentenceHoaksCount} • Fakta ${model.counts.sentenceFaktaCount} • ` +
+    `Ragu ${model.counts.sentenceRaguCount} • Paragraf Hoaks ${model.counts.paragraphHoaksCount}`;
+
+  confidenceList.innerHTML = "";
+
+  if (model.items.length === 0) {
+    const li = document.createElement("li");
+    li.textContent = "Tidak ada rincian confidence yang tersedia.";
+    confidenceList.appendChild(li);
+    confidenceDetails.classList.remove("hidden");
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
 
   model.items.forEach((item) => {
     item.sentences.forEach((sentence, sIdx) => {
@@ -441,41 +558,39 @@ function renderConfidenceDetails(paragraphs) {
         : sIdx + 1;
 
       const normalized = normalizeLabel(sentence?.label);
-      const conf = Number(sentence?.confidence);
+      const label = labelText(normalized);
+      const confidence = Number(sentence?.confidence);
       const pHoax = getSentenceHoaxProbability(sentence);
       const pFakta = getSentenceFaktaProbability(sentence);
 
-      rows.push(
-        `P${item.paragraphNumber} S${sentenceNumber} | ${labelText(normalized)} | confidence ${formatPercent(
-          conf
-        )} | P(hoaks) ${formatPercent(pHoax)} | P(fakta) ${formatPercent(pFakta)}`
-      );
+      const fullText = String(sentence?.text ?? "").trim();
+      const shortText = truncate(fullText, DETAIL_TEXT_MAX_LEN);
+
+      const li = document.createElement("li");
+      li.title = fullText || "(teks kosong)";
+      li.textContent =
+        `P${item.paragraphNumber} S${sentenceNumber} | "${shortText}" | ${label} | ` +
+        `confidence ${formatPercent(confidence)} | P(hoaks) ${formatPercent(pHoax)} | ` +
+        `P(fakta) ${formatPercent(pFakta)}`;
+      fragment.appendChild(li);
     });
   });
 
-  confidenceSummary.textContent =
-    `Rincian Keyakinan • ${model.counts.paragraphCount} paragraf • ${model.counts.sentenceCount} kalimat • ` +
-    `Hoaks ${model.counts.paragraphHoaks} • Fakta ${model.counts.paragraphFakta} • Ragu ${model.counts.raguSentences}`;
-
-  if (rows.length === 0) {
-    confidenceList.innerHTML = "<li>Tidak ada rincian confidence yang tersedia.</li>";
-  } else {
-    confidenceList.innerHTML = rows.map((row) => `<li>${escapeHtml(row)}</li>`).join("");
+  if (fragment.childNodes.length === 0) {
+    const li = document.createElement("li");
+    li.textContent = "Tidak ada rincian confidence yang tersedia.";
+    fragment.appendChild(li);
   }
 
+  confidenceList.appendChild(fragment);
   confidenceDetails.classList.remove("hidden");
-}
-
-function handleSample() {
-  if (!newsText) return;
-  newsText.value = SAMPLE_TEXT;
-  newsText.focus();
 }
 
 function handleReset() {
   if (newsText) newsText.value = "";
   clearError();
   resetOutput();
+  updateInputStats();
   if (newsText) newsText.focus();
 }
 
@@ -483,18 +598,18 @@ async function handleDetect() {
   clearError();
   resetOutput();
 
-  const rawText = String(newsText?.value || "");
-  if (!rawText.trim()) {
+  const text = String(newsText?.value || "");
+  if (!text.trim()) {
     showError("Masukkan teks berita terlebih dahulu.");
     return;
   }
 
-  const textToSend = normalizeInputForBackend(rawText);
+  const textToSend = normalizeParagraphBreaks(text);
 
   setLoading(true);
   try {
     const payload = await callAnalyzeApi(textToSend);
-    const paragraphs = extractParagraphs(payload);
+    const paragraphs = extractParagraphs(payload, textToSend);
 
     renderOutputInline(paragraphs);
     renderConfidenceDetails(paragraphs);
@@ -507,10 +622,10 @@ async function handleDetect() {
 }
 
 if (detectBtn) detectBtn.addEventListener("click", handleDetect);
-if (sampleBtn) sampleBtn.addEventListener("click", handleSample);
 if (resetBtn) resetBtn.addEventListener("click", handleReset);
 
 if (newsText) {
+  newsText.addEventListener("input", updateInputStats);
   newsText.addEventListener("keydown", (e) => {
     if (e.ctrlKey && (e.key === "Enter" || e.key === "NumpadEnter")) {
       e.preventDefault();
@@ -518,3 +633,5 @@ if (newsText) {
     }
   });
 }
+
+updateInputStats();
