@@ -24,11 +24,22 @@
       <main class="container">
         <section class="card">
           <h2>Analisis Berita</h2>
+          <div class="quick-actions">
+            <button id="sampleBtn" class="secondary small" type="button">
+              Isi contoh
+            </button>
+            <button id="clearBtn" class="secondary small" type="button">
+              Bersihkan
+            </button>
+          </div>
           <textarea
             id="newsText"
             rows="10"
             placeholder="Tempel teks berita (bisa beberapa paragraf)..."
           ></textarea>
+          <p id="inputStats" class="input-stats">
+            0 karakter • 0 kata • 0 paragraf
+          </p>
           <p class="hint">
             Tips: pisahkan paragraf dengan baris kosong agar analisis topik per
             paragraf lebih jelas.
@@ -52,6 +63,13 @@
           <p id="resultSummary" class="result__summary"></p>
           <p id="resultRiskExplanation" class="result__risk"></p>
 
+          <div class="legend-row">
+            <span class="legend-title">Legenda kalimat:</span>
+            <span class="legend-chip legend-chip--red">Hoaks</span>
+            <span class="legend-chip legend-chip--amber">Perlu cek</span>
+            <span class="legend-chip legend-chip--green">Bukan hoaks</span>
+          </div>
+
           <div id="sharedTopics" class="shared-topics hidden"></div>
 
           <div class="actions-row">
@@ -60,6 +78,9 @@
             </button>
             <button id="shareBtn" class="secondary small" type="button">
               Share
+            </button>
+            <button id="toggleParagraphsBtn" class="secondary small" type="button">
+              Tutup semua paragraf
             </button>
           </div>
 

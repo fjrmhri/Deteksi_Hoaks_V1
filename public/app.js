@@ -86,6 +86,9 @@ const submitBtn = document.getElementById("submitBtn");
 const submitLabel = document.getElementById("submitLabel");
 const submitSpinner = document.getElementById("submitSpinner");
 const newsText = document.getElementById("newsText");
+const sampleBtn = document.getElementById("sampleBtn");
+const clearBtn = document.getElementById("clearBtn");
+const inputStats = document.getElementById("inputStats");
 const statusPanel = document.getElementById("statusPanel");
 const resultPanel = document.getElementById("resultPanel");
 const resultBadge = document.getElementById("resultBadge");
@@ -95,11 +98,20 @@ const resultSummary = document.getElementById("resultSummary");
 const resultRiskExplanation = document.getElementById("resultRiskExplanation");
 const sharedTopicsEl = document.getElementById("sharedTopics");
 const paragraphResultsEl = document.getElementById("paragraphResults");
+const toggleParagraphsBtn = document.getElementById("toggleParagraphsBtn");
 
 const copyBtn = document.getElementById("copyBtn");
 const shareBtn = document.getElementById("shareBtn");
 
 let lastResultShareText = "";
+let areParagraphsCollapsed = false;
+const INPUT_CACHE_KEY = "hoax_input_cache_v1";
+
+const SAMPLE_TEXT = `Beredar unggahan media sosial yang menyebut pemerintah membagikan bantuan tunai tanpa syarat melalui tautan tertentu. Unggahan tersebut meminta warga mengirim data pribadi dan OTP agar dana cepat cair.
+
+Kementerian terkait lalu mengeluarkan klarifikasi resmi bahwa informasi tersebut tidak benar. Masyarakat diminta mengecek pengumuman hanya dari situs dan akun pemerintah yang terverifikasi.
+
+Pakar keamanan digital juga mengingatkan bahwa tautan serupa sering dipakai untuk phishing. Warga disarankan tidak membagikan pesan berantai sebelum verifikasi sumber.`;
 
 // =========================
 // Helper: Status UI
@@ -118,6 +130,54 @@ const clearStatus = () => {
   statusPanel.textContent = "";
   statusPanel.classList.add("hidden");
   statusPanel.classList.remove("error", "success");
+};
+
+const getParagraphCount = (text) => {
+  const raw = String(text || "").trim();
+  if (!raw) return 0;
+  const paragraphs = raw
+    .split(/\n\s*\n+/)
+    .map((x) => x.trim())
+    .filter(Boolean);
+  if (paragraphs.length > 0) return paragraphs.length;
+  return 1;
+};
+
+const getWordCount = (text) => {
+  const raw = String(text || "").trim();
+  if (!raw) return 0;
+  return raw.split(/\s+/).filter(Boolean).length;
+};
+
+const updateInputStats = (text) => {
+  if (!inputStats) return;
+  const content = String(text || "");
+  const charCount = content.length;
+  const wordCount = getWordCount(content);
+  const paragraphCount = getParagraphCount(content);
+  inputStats.textContent = `${charCount} karakter • ${wordCount} kata • ${paragraphCount} paragraf`;
+};
+
+const saveInputDraft = (text) => {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(INPUT_CACHE_KEY, String(text || ""));
+  } catch (_) {
+    // ignore storage errors
+  }
+};
+
+const restoreInputDraft = () => {
+  if (typeof window === "undefined" || !newsText) return;
+  try {
+    const draft = window.localStorage.getItem(INPUT_CACHE_KEY);
+    if (draft && !newsText.value) {
+      newsText.value = draft;
+    }
+  } catch (_) {
+    // ignore storage errors
+  }
+  updateInputStats(newsText.value || "");
 };
 
 const fetchWithTimeout = async (url, options = {}, timeoutMs = API_TIMEOUT_MS) => {
@@ -147,6 +207,8 @@ const formatPercent = (value) => {
 const setLoading = (isLoading) => {
   if (!submitBtn || !submitSpinner || !submitLabel) return;
   submitBtn.disabled = isLoading;
+  if (sampleBtn) sampleBtn.disabled = isLoading;
+  if (clearBtn) clearBtn.disabled = isLoading;
   if (isLoading) {
     submitSpinner.classList.remove("hidden");
     submitLabel.textContent = "Memproses...";
@@ -220,6 +282,14 @@ const mapLabelText = (label) => {
 // Render helpers
 // =========================
 
+const updateToggleParagraphsBtn = (enabled) => {
+  if (!toggleParagraphsBtn) return;
+  toggleParagraphsBtn.disabled = !enabled;
+  toggleParagraphsBtn.textContent = areParagraphsCollapsed
+    ? "Buka semua paragraf"
+    : "Tutup semua paragraf";
+};
+
 const renderSharedTopics = (sharedTopics) => {
   if (!sharedTopicsEl) return;
 
@@ -264,14 +334,16 @@ const renderParagraphs = (paragraphs) => {
     empty.textContent = "Tidak ada paragraf yang dapat dianalisis.";
     fragment.appendChild(empty);
     paragraphResultsEl.appendChild(fragment);
+    updateToggleParagraphsBtn(false);
     return;
   }
 
   paragraphs.forEach((paragraph) => {
-    const wrapper = document.createElement("article");
+    const wrapper = document.createElement("details");
     wrapper.className = "paragraph-card";
+    wrapper.open = !areParagraphsCollapsed;
 
-    const header = document.createElement("div");
+    const header = document.createElement("summary");
     header.className = "paragraph-card__header";
 
     const title = document.createElement("h3");
@@ -287,6 +359,9 @@ const renderParagraphs = (paragraphs) => {
 
     header.appendChild(title);
     header.appendChild(status);
+
+    const bodyWrap = document.createElement("div");
+    bodyWrap.className = "paragraph-card__body";
 
     const topic = document.createElement("p");
     topic.className = "paragraph-topic";
@@ -324,14 +399,17 @@ const renderParagraphs = (paragraphs) => {
       sentenceList.appendChild(item);
     });
 
+    bodyWrap.appendChild(topic);
+    bodyWrap.appendChild(paragraphMeta);
+    bodyWrap.appendChild(sentenceList);
+
     wrapper.appendChild(header);
-    wrapper.appendChild(topic);
-    wrapper.appendChild(paragraphMeta);
-    wrapper.appendChild(sentenceList);
+    wrapper.appendChild(bodyWrap);
     fragment.appendChild(wrapper);
   });
 
   paragraphResultsEl.appendChild(fragment);
+  updateToggleParagraphsBtn(true);
 };
 
 // =========================
@@ -374,6 +452,7 @@ const renderResult = (analysisResult, originalText) => {
   resultRiskExplanation.textContent = doc.risk_explanation || "";
 
   renderSharedTopics(analysisResult.sharedTopics || []);
+  areParagraphsCollapsed = false;
   renderParagraphs(analysisResult.paragraphs || []);
 
   const paragraphShareLines = (analysisResult.paragraphs || []).map((p) => {
@@ -487,6 +566,37 @@ async function handleShare() {
   }
 }
 
+function handleFillSample() {
+  if (!newsText) return;
+  newsText.value = SAMPLE_TEXT;
+  saveInputDraft(newsText.value);
+  updateInputStats(newsText.value);
+  newsText.focus();
+}
+
+function handleClearInput() {
+  if (!newsText) return;
+  newsText.value = "";
+  saveInputDraft("");
+  updateInputStats("");
+  clearStatus();
+  if (resultPanel) resultPanel.classList.add("hidden");
+  updateToggleParagraphsBtn(false);
+  newsText.focus();
+}
+
+function handleToggleParagraphs() {
+  if (!paragraphResultsEl) return;
+  const blocks = paragraphResultsEl.querySelectorAll(".paragraph-card");
+  if (!blocks.length) return;
+
+  areParagraphsCollapsed = !areParagraphsCollapsed;
+  blocks.forEach((block) => {
+    block.open = !areParagraphsCollapsed;
+  });
+  updateToggleParagraphsBtn(true);
+}
+
 // =========================
 // Handler submit
 // =========================
@@ -494,8 +604,11 @@ async function handleShare() {
 async function handleSubmit() {
   clearStatus();
   if (resultPanel) resultPanel.classList.add("hidden");
+  updateToggleParagraphsBtn(false);
 
   const text = newsText ? newsText.value.trim() : "";
+  saveInputDraft(newsText ? newsText.value : "");
+  updateInputStats(newsText ? newsText.value : "");
   if (!text) {
     setStatus("Masukkan teks berita terlebih dahulu.", "error");
     return;
@@ -509,6 +622,9 @@ async function handleSubmit() {
     const analysisResult = extractAnalyzeResult(payload);
     renderResult(analysisResult, text);
     setStatus("Berhasil memuat hasil analisis.", "success");
+    if (resultPanel) {
+      resultPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
   } catch (err) {
     setStatus(err instanceof Error ? err.message : "Terjadi kesalahan saat memproses.", "error");
   } finally {
@@ -517,8 +633,16 @@ async function handleSubmit() {
 }
 
 if (submitBtn) submitBtn.addEventListener("click", handleSubmit);
+if (sampleBtn) sampleBtn.addEventListener("click", handleFillSample);
+if (clearBtn) clearBtn.addEventListener("click", handleClearInput);
+if (toggleParagraphsBtn)
+  toggleParagraphsBtn.addEventListener("click", handleToggleParagraphs);
 
 if (newsText) {
+  newsText.addEventListener("input", () => {
+    saveInputDraft(newsText.value);
+    updateInputStats(newsText.value);
+  });
   newsText.addEventListener("keydown", (e) => {
     if (e.ctrlKey && (e.key === "Enter" || e.key === "NumpadEnter")) {
       e.preventDefault();
@@ -529,6 +653,8 @@ if (newsText) {
 
 if (copyBtn) copyBtn.addEventListener("click", handleCopy);
 if (shareBtn) shareBtn.addEventListener("click", handleShare);
+updateToggleParagraphsBtn(false);
+restoreInputDraft();
 
 // =========================
 // Inisialisasi awal
