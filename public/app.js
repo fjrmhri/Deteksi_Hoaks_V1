@@ -153,7 +153,7 @@ const detectLabel = document.getElementById("detectLabel");
 const detectSpinner = document.getElementById("detectSpinner");
 const resetBtn = document.getElementById("resetBtn");
 const newsText = document.getElementById("newsText");
-const topicToggle = document.getElementById("topicToggle");
+const topicPerParagraphToggle = document.getElementById("topicToggle");
 
 const statParagraphs = document.getElementById("statParagraphs");
 const statSentences = document.getElementById("statSentences");
@@ -1050,6 +1050,7 @@ function prepareParagraphModel(
   const sorted = sortByParagraphIndex(paragraphs);
   const items = [];
   const isFallback = Boolean(options?.isFallback);
+  const topicPerParagraph = Boolean(options?.topicPerParagraph);
   const inputParagraphTexts = Array.isArray(options?.inputParagraphTexts)
     ? options.inputParagraphTexts
     : [];
@@ -1084,19 +1085,26 @@ function prepareParagraphModel(
     const paragraphTextForTopic = String(
       paragraph?.text ?? inputParagraphTexts[index] ?? ""
     );
-    const resolvedTopic = resolveParagraphTopic(
-      paragraph,
-      globalTopic,
-      paragraphTextForTopic,
-      isFallback
-    );
-    const normalizedTopicLabel = cleanTopicLabel(resolvedTopic?.label);
-    const resolvedTopicScore = normalizeTopicScore(resolvedTopic?.score);
-    const hasTopicLabel = Boolean(normalizedTopicLabel);
-    const hasTopicScore =
-      hasTopicLabel &&
-      Number.isFinite(Number(resolvedTopicScore)) &&
-      Number(resolvedTopicScore) > 0;
+    let normalizedTopicLabel = null;
+    let resolvedTopicScore = null;
+    let hasTopicLabel = false;
+    let hasTopicScore = false;
+
+    if (topicPerParagraph) {
+      const resolvedTopic = resolveParagraphTopic(
+        paragraph,
+        globalTopic,
+        paragraphTextForTopic,
+        isFallback
+      );
+      normalizedTopicLabel = cleanTopicLabel(resolvedTopic?.label);
+      resolvedTopicScore = normalizeTopicScore(resolvedTopic?.score);
+      hasTopicLabel = Boolean(normalizedTopicLabel);
+      hasTopicScore =
+        hasTopicLabel &&
+        Number.isFinite(Number(resolvedTopicScore)) &&
+        Number(resolvedTopicScore) > 0;
+    }
 
     items.push({
       paragraphNumber,
@@ -1131,6 +1139,7 @@ function renderOutputInlineWithPayload(payload, paragraphs, options = {}) {
 
   outputParagraphs.innerHTML = "";
   const globalTopic = extractGlobalTopic(payload);
+  const topicPerParagraph = Boolean(options?.topicPerParagraph);
   const model = prepareParagraphModel(paragraphs, globalTopic, options);
 
   let summaryText =
@@ -1139,7 +1148,7 @@ function renderOutputInlineWithPayload(payload, paragraphs, options = {}) {
     `Fakta ${model.counts.sentenceFaktaCount} • Ragu ${model.counts.sentenceRaguCount} • ` +
     `Paragraf Hoaks ${model.counts.paragraphHoaksCount}`;
   const globalTopicLabel = cleanTopicLabel(globalTopic.label);
-  if (globalTopicLabel) {
+  if (!topicPerParagraph && globalTopicLabel) {
     const globalTopicScore = normalizeTopicScore(globalTopic.score);
     const globalTopicText =
       globalTopicScore !== null && globalTopicScore > 0
@@ -1163,11 +1172,14 @@ function renderOutputInlineWithPayload(payload, paragraphs, options = {}) {
     const block = document.createElement("article");
     block.className = "paragraph-block";
 
-    const topicMetaText = formatTopicMeta(item.topicLabel, item.topicScore);
-
     const meta = document.createElement("p");
     meta.className = "paragraph-meta";
-    meta.textContent = `Paragraf ${item.paragraphNumber} • ${topicMetaText}`;
+    if (topicPerParagraph) {
+      const topicMetaText = formatTopicMeta(item.topicLabel, item.topicScore);
+      meta.textContent = `Paragraf ${item.paragraphNumber} • ${topicMetaText}`;
+    } else {
+      meta.textContent = `Paragraf ${item.paragraphNumber}`;
+    }
 
     const text = document.createElement("p");
     text.className = "paragraph-text";
@@ -1192,13 +1204,17 @@ function renderOutputInlineWithPayload(payload, paragraphs, options = {}) {
 }
 
 function renderOutputInline(paragraphs) {
-  return renderOutputInlineWithPayload(null, paragraphs, {});
+  return renderOutputInlineWithPayload(null, paragraphs, { topicPerParagraph: true });
 }
 
-function renderConfidenceDetails(paragraphs, globalTopic = { label: null, score: null }) {
+function renderConfidenceDetails(
+  paragraphs,
+  globalTopic = { label: null, score: null },
+  options = {}
+) {
   if (!confidenceDetails || !confidenceSummary || !confidenceList) return;
 
-  const model = prepareParagraphModel(paragraphs, globalTopic);
+  const model = prepareParagraphModel(paragraphs, globalTopic, options);
 
   confidenceSummary.textContent =
     `Rincian Keyakinan • ${model.counts.paragraphCount} paragraf • ${model.counts.sentenceCount} kalimat • ` +
@@ -1309,7 +1325,7 @@ async function handleDetect() {
 
   const textToSend = normalizeParagraphBreaks(text);
   const inputParagraphTexts = splitParagraphsByBlankLine(textToSend);
-  const topicPerParagraph = Boolean(topicToggle?.checked);
+  const topicPerParagraph = Boolean(topicPerParagraphToggle?.checked);
 
   setLoading(true);
   try {
@@ -1320,10 +1336,10 @@ async function handleDetect() {
       : 0;
     const isFallback = backendParagraphCount === 1 && inputParagraphTexts.length > 1;
     const paragraphs = extractParagraphs(lastPayload, textToSend);
-    const renderOptions = { isFallback, inputParagraphTexts };
+    const renderOptions = { isFallback, inputParagraphTexts, topicPerParagraph };
 
     const rendered = renderOutputInlineWithPayload(lastPayload, paragraphs, renderOptions);
-    renderConfidenceDetails(paragraphs, rendered?.globalTopic);
+    renderConfidenceDetails(paragraphs, rendered?.globalTopic, { topicPerParagraph });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Terjadi kesalahan saat memproses.";
     showError(msg);
