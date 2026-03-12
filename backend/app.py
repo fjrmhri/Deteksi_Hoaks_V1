@@ -132,6 +132,7 @@ class BatchPredictResponse(BaseModel):
 class AnalyzeRequest(BaseModel):
     text: str
     topic_per_paragraph: bool = False
+    sentence_level: bool = True
 
 
 class DocumentSummary(BaseModel):
@@ -613,38 +614,61 @@ def analyze(request: AnalyzeRequest):
 
     paragraph_texts = _split_paragraphs(original_text)
 
-    sentence_texts: List[str] = []
-    sentence_map: List[Tuple[int, int]] = []
-
-    for p_idx, paragraph in enumerate(paragraph_texts):
-        for s_idx, sentence in enumerate(_split_sentences(paragraph)):
-            sentence_texts.append(sentence)
-            sentence_map.append((p_idx, s_idx))
-
-    sentence_prob_list = _predict_proba(sentence_texts, batch_size=SENTENCE_BATCH_SIZE)
-
     paragraph_sentences: List[List[SentenceAnalysis]] = [[] for _ in paragraph_texts]
+    if request.sentence_level:
+        sentence_texts: List[str] = []
+        sentence_map: List[Tuple[int, int]] = []
 
-    for (p_idx, s_idx), sent_text, sent_prob_dict in zip(sentence_map, sentence_texts, sentence_prob_list):
-        p_hoax = _extract_hoax_probability(sent_prob_dict)
-        p_not_hoax = _extract_not_hoax_probability(sent_prob_dict, p_hoax)
-        sent_label = _to_canonical_label(p_hoax)
-        sent_conf = max(p_hoax, p_not_hoax)
+        for p_idx, paragraph in enumerate(paragraph_texts):
+            for s_idx, sentence in enumerate(_split_sentences(paragraph)):
+                sentence_texts.append(sentence)
+                sentence_map.append((p_idx, s_idx))
 
-        paragraph_sentences[p_idx].append(
-            SentenceAnalysis(
-                sentence_index=int(s_idx),
-                text=sent_text,
-                label=sent_label,
-                probabilities={
-                    "not_hoax": _round6(p_not_hoax),
-                    "hoax": _round6(p_hoax),
-                },
-                hoax_probability=_round6(p_hoax),
-                confidence=_round6(sent_conf),
-                color=_sentence_color(sent_label, sent_conf),
+        sentence_prob_list = _predict_proba(sentence_texts, batch_size=SENTENCE_BATCH_SIZE)
+
+        for (p_idx, s_idx), sent_text, sent_prob_dict in zip(sentence_map, sentence_texts, sentence_prob_list):
+            p_hoax = _extract_hoax_probability(sent_prob_dict)
+            p_not_hoax = _extract_not_hoax_probability(sent_prob_dict, p_hoax)
+            sent_label = _to_canonical_label(p_hoax)
+            sent_conf = max(p_hoax, p_not_hoax)
+
+            paragraph_sentences[p_idx].append(
+                SentenceAnalysis(
+                    sentence_index=int(s_idx),
+                    text=sent_text,
+                    label=sent_label,
+                    probabilities={
+                        "not_hoax": _round6(p_not_hoax),
+                        "hoax": _round6(p_hoax),
+                    },
+                    hoax_probability=_round6(p_hoax),
+                    confidence=_round6(sent_conf),
+                    color=_sentence_color(sent_label, sent_conf),
+                )
             )
-        )
+    else:
+        paragraph_prob_list = _predict_proba(paragraph_texts, batch_size=SENTENCE_BATCH_SIZE)
+
+        for p_idx, (paragraph_text, para_prob_dict) in enumerate(zip(paragraph_texts, paragraph_prob_list)):
+            p_hoax = _extract_hoax_probability(para_prob_dict)
+            p_not_hoax = _extract_not_hoax_probability(para_prob_dict, p_hoax)
+            para_label = _to_canonical_label(p_hoax)
+            para_conf = max(p_hoax, p_not_hoax)
+
+            paragraph_sentences[p_idx].append(
+                SentenceAnalysis(
+                    sentence_index=0,
+                    text=paragraph_text,
+                    label=para_label,
+                    probabilities={
+                        "not_hoax": _round6(p_not_hoax),
+                        "hoax": _round6(p_hoax),
+                    },
+                    hoax_probability=_round6(p_hoax),
+                    confidence=_round6(para_conf),
+                    color=_sentence_color(para_label, para_conf),
+                )
+            )
 
     fallback_topic = TopicInfo(
         label="topik_umum",

@@ -153,6 +153,7 @@ const detectLabel = document.getElementById("detectLabel");
 const detectSpinner = document.getElementById("detectSpinner");
 const resetBtn = document.getElementById("resetBtn");
 const newsText = document.getElementById("newsText");
+const sentenceLevelToggle = document.getElementById("sentenceLevelToggle");
 const topicPerParagraphToggle = document.getElementById("topicToggle");
 
 const statParagraphs = document.getElementById("statParagraphs");
@@ -856,7 +857,7 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = API_TIMEOUT_MS) {
   }
 }
 
-async function callAnalyzeApi(text, topicPerParagraph) {
+async function callAnalyzeApi(text, topicPerParagraph, sentenceLevel) {
   if (!apiBaseUrl) throw new Error("API base URL kosong.");
 
   const endpoint = `${apiBaseUrl}/analyze`;
@@ -876,6 +877,7 @@ async function callAnalyzeApi(text, topicPerParagraph) {
       body: JSON.stringify({
         text,
         topic_per_paragraph: Boolean(topicPerParagraph),
+        sentence_level: sentenceLevel !== false,
       }),
     });
 
@@ -1140,6 +1142,7 @@ function renderOutputInlineWithPayload(payload, paragraphs, options = {}) {
   outputParagraphs.innerHTML = "";
   const globalTopic = extractGlobalTopic(payload);
   const topicPerParagraph = Boolean(options?.topicPerParagraph);
+  const sentenceLevel = options?.sentenceLevel !== false;
   const model = prepareParagraphModel(paragraphs, globalTopic, options);
 
   let summaryText =
@@ -1184,11 +1187,26 @@ function renderOutputInlineWithPayload(payload, paragraphs, options = {}) {
     const text = document.createElement("p");
     text.className = "paragraph-text";
 
-    const highlighted = joinHighlightedSentences(item.sentences);
-    if (highlighted) {
-      text.innerHTML = highlighted;
+    if (sentenceLevel) {
+      const highlighted = joinHighlightedSentences(item.sentences);
+      if (highlighted) {
+        text.innerHTML = highlighted;
+      } else {
+        text.innerHTML = escapeHtml(item.paragraphText);
+      }
     } else {
-      text.innerHTML = escapeHtml(item.paragraphText);
+      const paraPrediction = item.sentences[0] || null;
+      if (paraPrediction) {
+        const normalized = normalizeLabel(paraPrediction?.label);
+        const confidence = Number(paraPrediction?.confidence);
+        const hlClass = kelasHighlight(normalized, confidence, CONFIDENCE_CUTOFF);
+        const title = `${labelText(normalized)} | confidence ${formatPercent(confidence)}`;
+        text.innerHTML = `<span class="hl ${hlClass}" title="${escapeHtml(title)}">${escapeHtml(
+          item.paragraphText
+        )}</span>`;
+      } else {
+        text.innerHTML = escapeHtml(item.paragraphText);
+      }
     }
 
     block.appendChild(meta);
@@ -1204,7 +1222,10 @@ function renderOutputInlineWithPayload(payload, paragraphs, options = {}) {
 }
 
 function renderOutputInline(paragraphs) {
-  return renderOutputInlineWithPayload(null, paragraphs, { topicPerParagraph: true });
+  return renderOutputInlineWithPayload(null, paragraphs, {
+    topicPerParagraph: true,
+    sentenceLevel: true,
+  });
 }
 
 function renderConfidenceDetails(
@@ -1215,6 +1236,7 @@ function renderConfidenceDetails(
   if (!confidenceDetails || !confidenceSummary || !confidenceList) return;
 
   const model = prepareParagraphModel(paragraphs, globalTopic, options);
+  const sentenceLevel = options?.sentenceLevel !== false;
 
   confidenceSummary.textContent =
     `Rincian Keyakinan • ${model.counts.paragraphCount} paragraf • ${model.counts.sentenceCount} kalimat • ` +
@@ -1233,17 +1255,75 @@ function renderConfidenceDetails(
 
   const fragment = document.createDocumentFragment();
 
-  model.items.forEach((item) => {
-    item.sentences.forEach((sentence, sIdx) => {
-      const sentenceNumber = Number.isFinite(Number(sentence?.sentence_index))
-        ? Number(sentence.sentence_index) + 1
-        : sIdx + 1;
+  if (sentenceLevel) {
+    model.items.forEach((item) => {
+      item.sentences.forEach((sentence, sIdx) => {
+        const sentenceNumber = Number.isFinite(Number(sentence?.sentence_index))
+          ? Number(sentence.sentence_index) + 1
+          : sIdx + 1;
 
+        const confidence = Number(sentence?.confidence);
+        const pHoax = getSentenceHoaxProbability(sentence);
+        const pFakta = getSentenceFaktaProbability(sentence);
+
+        const fullText = String(sentence?.text ?? "").trim();
+        const shortText = truncate(fullText, DETAIL_TEXT_MAX_LEN);
+
+        const li = document.createElement("li");
+        li.className = "confidence-item";
+        li.title = fullText || "(teks kosong)";
+
+        const head = document.createElement("div");
+        head.className = "confidence-head";
+
+        const pos = document.createElement("span");
+        pos.className = "confidence-pos";
+        pos.textContent = `P${item.paragraphNumber} S${sentenceNumber}`;
+
+        const badge = document.createElement("span");
+        badge.className = `confidence-badge ${badgeClass(sentence?.label, confidence)}`;
+        badge.textContent = badgeText(sentence?.label, confidence);
+
+        head.appendChild(pos);
+        head.appendChild(badge);
+
+        const metrics = document.createElement("div");
+        metrics.className = "confidence-metrics";
+
+        const metricConfidence = document.createElement("span");
+        metricConfidence.className = "confidence-metric";
+        metricConfidence.textContent = `Confidence ${formatPercent(confidence)}`;
+
+        const metricHoax = document.createElement("span");
+        metricHoax.className = "confidence-metric";
+        metricHoax.textContent = `P(hoaks) ${formatPercent(pHoax)}`;
+
+        const metricFakta = document.createElement("span");
+        metricFakta.className = "confidence-metric";
+        metricFakta.textContent = `P(fakta) ${formatPercent(pFakta)}`;
+
+        metrics.appendChild(metricConfidence);
+        metrics.appendChild(metricHoax);
+        metrics.appendChild(metricFakta);
+
+        const sentenceText = document.createElement("p");
+        sentenceText.className = "confidence-text";
+        sentenceText.textContent = shortText || "(teks kosong)";
+
+        li.appendChild(head);
+        li.appendChild(metrics);
+        li.appendChild(sentenceText);
+        fragment.appendChild(li);
+      });
+    });
+  } else {
+    model.items.forEach((item) => {
+      const sentence = item.sentences[0] || {};
       const confidence = Number(sentence?.confidence);
       const pHoax = getSentenceHoaxProbability(sentence);
       const pFakta = getSentenceFaktaProbability(sentence);
 
-      const fullText = String(sentence?.text ?? "").trim();
+      const fullText = String(item.paragraphText || sentence?.text || "").trim();
       const shortText = truncate(fullText, DETAIL_TEXT_MAX_LEN);
 
       const li = document.createElement("li");
@@ -1255,7 +1335,7 @@ function renderConfidenceDetails(
 
       const pos = document.createElement("span");
       pos.className = "confidence-pos";
-      pos.textContent = `P${item.paragraphNumber} S${sentenceNumber}`;
+      pos.textContent = `P${item.paragraphNumber}`;
 
       const badge = document.createElement("span");
       badge.className = `confidence-badge ${badgeClass(sentence?.label, confidence)}`;
@@ -1283,16 +1363,16 @@ function renderConfidenceDetails(
       metrics.appendChild(metricHoax);
       metrics.appendChild(metricFakta);
 
-      const sentenceText = document.createElement("p");
-      sentenceText.className = "confidence-text";
-      sentenceText.textContent = shortText || "(teks kosong)";
+      const paragraphText = document.createElement("p");
+      paragraphText.className = "confidence-text";
+      paragraphText.textContent = shortText || "(teks kosong)";
 
       li.appendChild(head);
       li.appendChild(metrics);
-      li.appendChild(sentenceText);
+      li.appendChild(paragraphText);
       fragment.appendChild(li);
     });
-  });
+  }
 
   if (fragment.childNodes.length === 0) {
     const li = document.createElement("li");
@@ -1325,21 +1405,30 @@ async function handleDetect() {
 
   const textToSend = normalizeParagraphBreaks(text);
   const inputParagraphTexts = splitParagraphsByBlankLine(textToSend);
+  const sentenceLevel = sentenceLevelToggle ? Boolean(sentenceLevelToggle.checked) : true;
   const topicPerParagraph = Boolean(topicPerParagraphToggle?.checked);
 
   setLoading(true);
   try {
-    const payload = await callAnalyzeApi(textToSend, topicPerParagraph);
+    const payload = await callAnalyzeApi(textToSend, topicPerParagraph, sentenceLevel);
     lastPayload = payload;
     const backendParagraphCount = Array.isArray(lastPayload?.paragraphs)
       ? lastPayload.paragraphs.length
       : 0;
     const isFallback = backendParagraphCount === 1 && inputParagraphTexts.length > 1;
     const paragraphs = extractParagraphs(lastPayload, textToSend);
-    const renderOptions = { isFallback, inputParagraphTexts, topicPerParagraph };
+    const renderOptions = {
+      isFallback,
+      inputParagraphTexts,
+      topicPerParagraph,
+      sentenceLevel,
+    };
 
     const rendered = renderOutputInlineWithPayload(lastPayload, paragraphs, renderOptions);
-    renderConfidenceDetails(paragraphs, rendered?.globalTopic, { topicPerParagraph });
+    renderConfidenceDetails(paragraphs, rendered?.globalTopic, {
+      topicPerParagraph,
+      sentenceLevel,
+    });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Terjadi kesalahan saat memproses.";
     showError(msg);
