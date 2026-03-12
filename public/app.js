@@ -934,6 +934,100 @@ function computeOverallLabel(paragraphs) {
   return hasHoaks ? "hoaks" : "fakta";
 }
 
+function getUnitCategory(label, confidence, cutoff = CONFIDENCE_CUTOFF) {
+  const conf = Number(confidence);
+  if (!Number.isFinite(conf) || conf < cutoff) return "ragu";
+  return normalizeLabel(label) === "hoaks" ? "hoaks" : "fakta";
+}
+
+function buildSummaryModel(paragraphModels, mode, cutoff = CONFIDENCE_CUTOFF) {
+  const items = Array.isArray(paragraphModels) ? paragraphModels : [];
+  const sentenceCounts = { hoaks: 0, fakta: 0, ragu: 0 };
+  const paragraphCounts = { hoaks: 0, fakta: 0, ragu: 0 };
+
+  if (mode === "sentence") {
+    items.forEach((item) => {
+      const sentences = Array.isArray(item?.sentences) ? item.sentences : [];
+      let hasNonRaguHoaks = false;
+      let hasNonRaguFakta = false;
+
+      sentences.forEach((sentence) => {
+        const category = getUnitCategory(sentence?.label, sentence?.confidence, cutoff);
+        sentenceCounts[category] += 1;
+        if (category === "hoaks") hasNonRaguHoaks = true;
+        if (category === "fakta") hasNonRaguFakta = true;
+      });
+
+      let paragraphCategory = "ragu";
+      if (hasNonRaguHoaks) paragraphCategory = "hoaks";
+      else if (hasNonRaguFakta) paragraphCategory = "fakta";
+      paragraphCounts[paragraphCategory] += 1;
+    });
+  } else {
+    items.forEach((item) => {
+      const paragraphPrediction =
+        Array.isArray(item?.sentences) && item.sentences.length > 0 ? item.sentences[0] : null;
+      const category = getUnitCategory(
+        paragraphPrediction?.label,
+        paragraphPrediction?.confidence,
+        cutoff
+      );
+      paragraphCounts[category] += 1;
+    });
+  }
+
+  const overallLabel =
+    paragraphCounts.hoaks > 0 ? "hoaks" : paragraphCounts.fakta > 0 ? "fakta" : "ragu";
+
+  return {
+    mode,
+    paragraphs_total: items.length,
+    sentences_total: mode === "sentence" ? sentenceCounts.hoaks + sentenceCounts.fakta + sentenceCounts.ragu : 0,
+    counts_sentence: mode === "sentence" ? sentenceCounts : null,
+    counts_paragraph: paragraphCounts,
+    overall_label: overallLabel,
+  };
+}
+
+function buildGlobalSummaryMarkup(summaryModel, globalTopicText = null) {
+  const lines = [];
+  if (summaryModel?.mode === "sentence") {
+    lines.push("Mode: Per kalimat • Unit analisis: kalimat");
+    lines.push(
+      `Kalimat: total ${summaryModel.sentences_total} • Hoaks ${summaryModel.counts_sentence.hoaks} • Fakta ${summaryModel.counts_sentence.fakta} • Ragu ${summaryModel.counts_sentence.ragu}`
+    );
+    lines.push(
+      `Paragraf: total ${summaryModel.paragraphs_total} • Hoaks ${summaryModel.counts_paragraph.hoaks} • Fakta ${summaryModel.counts_paragraph.fakta} • Ragu ${summaryModel.counts_paragraph.ragu}`
+    );
+  } else {
+    lines.push("Mode: Per paragraf • Unit analisis: paragraf");
+    lines.push(
+      `Paragraf: total ${summaryModel.paragraphs_total} • Hoaks ${summaryModel.counts_paragraph.hoaks} • Fakta ${summaryModel.counts_paragraph.fakta} • Ragu ${summaryModel.counts_paragraph.ragu}`
+    );
+  }
+
+  if (globalTopicText) {
+    lines.push(`Topik Global: ${globalTopicText}`);
+  }
+
+  return lines.map((line) => escapeHtml(line)).join("<br>");
+}
+
+function buildConfidenceSummaryText(summaryModel) {
+  if (summaryModel?.mode === "sentence") {
+    return (
+      `Rincian Keyakinan • Mode: Per kalimat • ` +
+      `Kalimat ${summaryModel.sentences_total} (Hoaks ${summaryModel.counts_sentence.hoaks} • Fakta ${summaryModel.counts_sentence.fakta} • Ragu ${summaryModel.counts_sentence.ragu}) • ` +
+      `Paragraf ${summaryModel.paragraphs_total} (Hoaks ${summaryModel.counts_paragraph.hoaks} • Fakta ${summaryModel.counts_paragraph.fakta} • Ragu ${summaryModel.counts_paragraph.ragu})`
+    );
+  }
+
+  return (
+    `Rincian Keyakinan • Mode: Per paragraf • ` +
+    `Paragraf ${summaryModel.paragraphs_total} (Hoaks ${summaryModel.counts_paragraph.hoaks} • Fakta ${summaryModel.counts_paragraph.fakta} • Ragu ${summaryModel.counts_paragraph.ragu})`
+  );
+}
+
 function needsSoftSpace(previousRaw, currentRaw) {
   if (!previousRaw || !currentRaw) return false;
   if (/\s$/.test(previousRaw)) return false;
@@ -1144,29 +1238,26 @@ function renderOutputInlineWithPayload(payload, paragraphs, options = {}) {
   const topicPerParagraph = Boolean(options?.topicPerParagraph);
   const sentenceLevel = options?.sentenceLevel !== false;
   const model = prepareParagraphModel(paragraphs, globalTopic, options);
+  const mode = sentenceLevel ? "sentence" : "paragraph";
+  const summaryModel = buildSummaryModel(model.items, mode, CONFIDENCE_CUTOFF);
 
-  let summaryText =
-    `Ringkasan: ${labelText(model.overallLabel)} • ${model.counts.paragraphCount} paragraf • ` +
-    `${model.counts.sentenceCount} kalimat • Hoaks ${model.counts.sentenceHoaksCount} • ` +
-    `Fakta ${model.counts.sentenceFaktaCount} • Ragu ${model.counts.sentenceRaguCount} • ` +
-    `Paragraf Hoaks ${model.counts.paragraphHoaksCount}`;
+  let globalTopicText = null;
   const globalTopicLabel = cleanTopicLabel(globalTopic.label);
   if (!topicPerParagraph && globalTopicLabel) {
     const globalTopicScore = normalizeTopicScore(globalTopic.score);
-    const globalTopicText =
+    globalTopicText =
       globalTopicScore !== null && globalTopicScore > 0
         ? `${globalTopicLabel} (${formatPercent(globalTopicScore)})`
         : globalTopicLabel;
-    summaryText += ` • Topik Global: ${globalTopicText}`;
   }
-  globalSummary.textContent = summaryText;
+  globalSummary.innerHTML = buildGlobalSummaryMarkup(summaryModel, globalTopicText);
 
   if (model.items.length === 0) {
     outputParagraphs.innerHTML =
       '<p class="paragraph-meta">Tidak ada paragraf yang bisa ditampilkan.</p>';
     outputSection.classList.remove("hidden");
     renderTopicDebug(payload, globalTopic, model, options);
-    return { model, globalTopic };
+    return { model, globalTopic, summaryModel };
   }
 
   const fragment = document.createDocumentFragment();
@@ -1218,7 +1309,7 @@ function renderOutputInlineWithPayload(payload, paragraphs, options = {}) {
   outputSection.classList.remove("hidden");
   renderTopicDebug(payload, globalTopic, model, options);
 
-  return { model, globalTopic };
+  return { model, globalTopic, summaryModel };
 }
 
 function renderOutputInline(paragraphs) {
@@ -1237,11 +1328,10 @@ function renderConfidenceDetails(
 
   const model = prepareParagraphModel(paragraphs, globalTopic, options);
   const sentenceLevel = options?.sentenceLevel !== false;
+  const mode = sentenceLevel ? "sentence" : "paragraph";
+  const summaryModel = options?.summaryModel || buildSummaryModel(model.items, mode, CONFIDENCE_CUTOFF);
 
-  confidenceSummary.textContent =
-    `Rincian Keyakinan • ${model.counts.paragraphCount} paragraf • ${model.counts.sentenceCount} kalimat • ` +
-    `Hoaks ${model.counts.sentenceHoaksCount} • Fakta ${model.counts.sentenceFaktaCount} • ` +
-    `Ragu ${model.counts.sentenceRaguCount} • Paragraf Hoaks ${model.counts.paragraphHoaksCount}`;
+  confidenceSummary.textContent = buildConfidenceSummaryText(summaryModel);
 
   confidenceList.innerHTML = "";
 
@@ -1428,6 +1518,7 @@ async function handleDetect() {
     renderConfidenceDetails(paragraphs, rendered?.globalTopic, {
       topicPerParagraph,
       sentenceLevel,
+      summaryModel: rendered?.summaryModel,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Terjadi kesalahan saat memproses.";
