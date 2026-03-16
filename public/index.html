@@ -58,6 +58,18 @@
           <p class="topic-toggle-hint">OFF: Topik global dokumen • ON: Topik per paragraf</p>
         </div>
 
+        <div class="control-row">
+          <label class="control-label" for="topicModelSelect">Metode Topik</label>
+          <select id="topicModelSelect" class="control-select">
+            <option value="tfidf">TF-IDF (cepat)</option>
+            <option value="nmf">NMF</option>
+            <option value="bertopic">BERTopic (lebih berat)</option>
+          </select>
+          <p class="topic-toggle-hint">
+            Backend akan fallback ke TF-IDF bila artifact metode terpilih belum tersedia.
+          </p>
+        </div>
+
         <p class="legend-note">
           <span class="legend legend--green">Hijau</span> = Fakta,
           <span class="legend legend--red">Merah</span> = Hoaks,

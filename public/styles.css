@@ -100,6 +100,35 @@ textarea:focus {
   gap: 0.28rem;
 }
 
+.control-row {
+  margin-top: 0.7rem;
+  display: grid;
+  gap: 0.32rem;
+}
+
+.control-label {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.control-select {
+  width: min(320px, 100%);
+  border: 1px solid #b8d0c7;
+  border-radius: 12px;
+  padding: 0.62rem 0.78rem;
+  background: #fff;
+  color: var(--ink);
+  font-weight: 600;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.control-select:focus {
+  outline: none;
+  border-color: #2d9f83;
+  box-shadow: 0 0 0 4px rgba(45, 159, 131, 0.14);
+}
+
 .topic-toggle {
   display: inline-flex;
   align-items: center;

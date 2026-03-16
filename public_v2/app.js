@@ -5,6 +5,14 @@ const DETAIL_TEXT_MAX_LEN = 190;
 const isDebug =
   typeof window !== "undefined" &&
   new URLSearchParams(window.location.search).get("debug") === "1";
+
+// ── V2: Topic model hints ─────────────────────────────────────────────────
+const TOPIC_MODEL_HINTS = {
+  tfidf:    "TF-IDF: keyword statistik berbasis frekuensi-inverse. Cepat, tidak perlu model tambahan.",
+  lda:      "LDA: distribusi topik probabilistik. Perlu artefak LDA dari Hugging Face (lazy-load).",
+  bertopic: "BERTopic: embedding semantik multilingual. Paling kaya makna; membutuhkan load BERTopic.",
+};
+// ─────────────────────────────────────────────────────────────────────────
 const ID_STOPWORDS = new Set([
   "yang",
   "dan",
@@ -155,7 +163,17 @@ const resetBtn = document.getElementById("resetBtn");
 const newsText = document.getElementById("newsText");
 const sentenceLevelToggle = document.getElementById("sentenceLevelToggle");
 const topicPerParagraphToggle = document.getElementById("topicToggle");
-const topicModelSelect = document.getElementById("topicModelSelect");
+
+// V2: topic model selector + hint element
+const topicModelSelect  = document.getElementById("topicModelSelect");
+const topicMethodHint   = document.getElementById("topicMethodHint");
+
+if (topicModelSelect && topicMethodHint) {
+  topicModelSelect.addEventListener("change", () => {
+    const method = topicModelSelect.value;
+    topicMethodHint.textContent = TOPIC_MODEL_HINTS[method] || "";
+  });
+}
 
 const statParagraphs = document.getElementById("statParagraphs");
 const statSentences = document.getElementById("statSentences");
@@ -202,21 +220,6 @@ function normalizeTopicScore(score) {
   if (n <= 1) return n;
   if (n <= 100) return n / 100;
   return null;
-}
-
-function normalizeTopicModel(rawModel) {
-  const value = String(rawModel || "")
-    .trim()
-    .toLowerCase();
-  if (value === "nmf" || value === "bertopic" || value === "tfidf") return value;
-  return "tfidf";
-}
-
-function topicModelLabel(rawModel) {
-  const model = normalizeTopicModel(rawModel);
-  if (model === "nmf") return "NMF";
-  if (model === "bertopic") return "BERTopic";
-  return "TF-IDF";
 }
 
 function cleanTopicLabel(rawLabel) {
@@ -736,9 +739,18 @@ function updateInputStats() {
   const s = countSentences(text);
   const w = countWords(text);
 
-  if (statParagraphs) statParagraphs.textContent = `Paragraf: ${p}`;
-  if (statSentences) statSentences.textContent = `Kalimat: ${s}`;
-  if (statWords) statWords.textContent = `Kata: ${w}`;
+  if (statParagraphs) {
+    const sp = statParagraphs.querySelector("span");
+    if (sp) sp.textContent = `${p} paragraf`; else statParagraphs.textContent = `${p} paragraf`;
+  }
+  if (statSentences) {
+    const ss = statSentences.querySelector("span");
+    if (ss) ss.textContent = `${s} kalimat`; else statSentences.textContent = `${s} kalimat`;
+  }
+  if (statWords) {
+    const sw = statWords.querySelector("span");
+    if (sw) sw.textContent = `${w} kata`; else statWords.textContent = `${w} kata`;
+  }
 }
 
 function normalizeParagraphBreaks(text) {
@@ -824,7 +836,8 @@ function getSentenceFaktaProbability(sentence) {
 
 function showError(message) {
   if (!errorBox) return;
-  errorBox.textContent = message;
+  const sp = errorBox.querySelector("span");
+  if (sp) sp.textContent = message; else errorBox.textContent = message;
   errorBox.classList.remove("hidden");
 }
 
@@ -841,10 +854,10 @@ function setLoading(isLoading) {
   if (resetBtn) resetBtn.disabled = isLoading;
 
   if (isLoading) {
-    detectLabel.textContent = "Mendeteksi...";
+    detectLabel.textContent = "Menganalisis…";
     detectSpinner.classList.remove("hidden");
   } else {
-    detectLabel.textContent = "Deteksi";
+    detectLabel.textContent = "Analisis Sekarang";
     detectSpinner.classList.add("hidden");
   }
 }
@@ -873,7 +886,7 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = API_TIMEOUT_MS) {
   }
 }
 
-async function callAnalyzeApi(text, topicPerParagraph, sentenceLevel, topicModel) {
+async function callAnalyzeApi(text, topicPerParagraph, sentenceLevel, topicModel = "tfidf") {
   if (!apiBaseUrl) throw new Error("API base URL kosong.");
 
   const endpoint = `${apiBaseUrl}/analyze`;
@@ -894,23 +907,11 @@ async function callAnalyzeApi(text, topicPerParagraph, sentenceLevel, topicModel
         text,
         topic_per_paragraph: Boolean(topicPerParagraph),
         sentence_level: sentenceLevel !== false,
-        topic_model: normalizeTopicModel(topicModel),
+        topic_model: topicModel || "tfidf",
       }),
     });
 
-    // Kompatibilitas backend lama: coba lagi tanpa topic_model, lalu fallback penuh.
-    if (response.status === 422) {
-      response = await fetchWithTimeout(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          text,
-          topic_per_paragraph: Boolean(topicPerParagraph),
-          sentence_level: sentenceLevel !== false,
-        }),
-      });
-    }
-
+    // Kompatibilitas backend lama: retry sekali jika field baru ditolak.
     if (response.status === 422) {
       response = await fetchWithTimeout(endpoint, {
         method: "POST",
@@ -1018,7 +1019,7 @@ function buildSummaryModel(paragraphModels, mode, cutoff = CONFIDENCE_CUTOFF) {
   };
 }
 
-function buildGlobalSummaryMarkup(summaryModel, globalTopicText = null, extraLines = []) {
+function buildGlobalSummaryMarkup(summaryModel, globalTopicText = null, topicModelUsed = null) {
   const lines = [];
   if (summaryModel?.mode === "sentence") {
     lines.push("Mode: Per kalimat • Unit analisis: kalimat");
@@ -1038,12 +1039,9 @@ function buildGlobalSummaryMarkup(summaryModel, globalTopicText = null, extraLin
   if (globalTopicText) {
     lines.push(`Topik Global: ${globalTopicText}`);
   }
-
-  if (Array.isArray(extraLines)) {
-    extraLines.forEach((line) => {
-      const text = String(line || "").trim();
-      if (text) lines.push(text);
-    });
+  if (topicModelUsed) {
+    const methodLabel = { tfidf: "TF-IDF", lda: "LDA", bertopic: "BERTopic" }[topicModelUsed] || topicModelUsed;
+    lines.push(`Metode Topik: ${methodLabel}`);
   }
 
   return lines.map((line) => escapeHtml(line)).join("<br>");
@@ -1286,25 +1284,8 @@ function renderOutputInlineWithPayload(payload, paragraphs, options = {}) {
         ? `${globalTopicLabel} (${formatPercent(globalTopicScore)})`
         : globalTopicLabel;
   }
-  const meta = payload && typeof payload === "object" ? payload.meta : null;
-  const topicModelRequested = normalizeTopicModel(
-    options?.topicModelRequested || meta?.topic_model_requested || "tfidf"
-  );
-  const topicModelUsed = normalizeTopicModel(meta?.topic_model_used || topicModelRequested);
-  const summaryExtraLines = [`Metode topik aktif: ${topicModelLabel(topicModelUsed)}`];
-  if (topicModelUsed !== topicModelRequested) {
-    const fallbackReason = String(meta?.topic_fallback_reason || "").trim();
-    summaryExtraLines.push(
-      fallbackReason
-        ? `Fallback topik: ${fallbackReason}`
-        : `Fallback topik: backend memakai ${topicModelLabel(topicModelUsed)}.`
-    );
-  }
-  globalSummary.innerHTML = buildGlobalSummaryMarkup(
-    summaryModel,
-    globalTopicText,
-    summaryExtraLines
-  );
+  const topicModelUsed = payload?.meta?.topic_model_used || null;
+  globalSummary.innerHTML = buildGlobalSummaryMarkup(summaryModel, globalTopicText, topicModelUsed);
 
   if (model.items.length === 0) {
     outputParagraphs.innerHTML =
@@ -1551,16 +1532,11 @@ async function handleDetect() {
   const inputParagraphTexts = splitParagraphsByBlankLine(textToSend);
   const sentenceLevel = sentenceLevelToggle ? Boolean(sentenceLevelToggle.checked) : true;
   const topicPerParagraph = Boolean(topicPerParagraphToggle?.checked);
-  const topicModel = normalizeTopicModel(topicModelSelect?.value || "tfidf");
 
   setLoading(true);
   try {
-    const payload = await callAnalyzeApi(
-      textToSend,
-      topicPerParagraph,
-      sentenceLevel,
-      topicModel
-    );
+    const topicModel = topicModelSelect ? String(topicModelSelect.value || "tfidf") : "tfidf";
+    const payload = await callAnalyzeApi(textToSend, topicPerParagraph, sentenceLevel, topicModel);
     lastPayload = payload;
     const backendParagraphCount = Array.isArray(lastPayload?.paragraphs)
       ? lastPayload.paragraphs.length
@@ -1572,7 +1548,6 @@ async function handleDetect() {
       inputParagraphTexts,
       topicPerParagraph,
       sentenceLevel,
-      topicModelRequested: topicModel,
     };
 
     const rendered = renderOutputInlineWithPayload(lastPayload, paragraphs, renderOptions);

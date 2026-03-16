@@ -6,3 +6,4 @@ numpy
 accelerate
 pydantic
 scikit-learn
+huggingface_hub
