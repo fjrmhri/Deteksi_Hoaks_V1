@@ -59,14 +59,67 @@
         </div>
 
         <div class="control-row">
-          <label class="control-label" for="topicModelSelect">Metode Topik</label>
-          <select id="topicModelSelect" class="control-select">
-            <option value="tfidf">TF-IDF (cepat)</option>
-            <option value="nmf">NMF</option>
-            <option value="bertopic">BERTopic (lebih berat)</option>
+          <label class="control-label">Metode Topic Modelling</label>
+
+          <!-- Hidden select — dibaca app.js seperti biasa -->
+          <select id="topicModelSelect" class="sr-only" aria-hidden="true" tabindex="-1">
+            <option value="tfidf" selected>TF-IDF</option>
+            <option value="lda">LDA</option>
+            <option value="bertopic">BERTopic</option>
           </select>
-          <p class="topic-toggle-hint">
-            Backend akan fallback ke TF-IDF bila artifact metode terpilih belum tersedia.
+
+          <!-- Card picker tema hijau -->
+          <div class="topic-method-grid" role="radiogroup" aria-label="Pilih metode topic modelling">
+
+            <button type="button" class="topic-method-card topic-method-card--active"
+                    data-value="tfidf" role="radio" aria-checked="true">
+              <span class="topic-method-card__check" aria-hidden="true"></span>
+              <span class="topic-method-card__icon topic-method-card__icon--tfidf">
+                <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
+                  <path d="M2 5h16M2 10h10M2 15h13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                  <path d="M15 13l3 2.5-3 2.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </span>
+              <span class="topic-method-card__body">
+                <span class="topic-method-card__name">TF-IDF</span>
+                <span class="topic-method-card__desc">Keyword statistik · Instan · Tanpa artefak</span>
+              </span>
+            </button>
+
+            <button type="button" class="topic-method-card"
+                    data-value="lda" role="radio" aria-checked="false">
+              <span class="topic-method-card__check" aria-hidden="true"></span>
+              <span class="topic-method-card__icon topic-method-card__icon--lda">
+                <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
+                  <circle cx="10" cy="10" r="8" stroke="currentColor" stroke-width="1.8"/>
+                  <path d="M10 2s3.5 3.5 3.5 8S10 18 10 18" stroke="currentColor" stroke-width="1.6"/>
+                  <path d="M2 10h16" stroke="currentColor" stroke-width="1.6"/>
+                </svg>
+              </span>
+              <span class="topic-method-card__body">
+                <span class="topic-method-card__name">LDA</span>
+                <span class="topic-method-card__desc">Distribusi probabilistik · Cepat · Pre-trained HF</span>
+              </span>
+            </button>
+
+            <button type="button" class="topic-method-card"
+                    data-value="bertopic" role="radio" aria-checked="false">
+              <span class="topic-method-card__check" aria-hidden="true"></span>
+              <span class="topic-method-card__icon topic-method-card__icon--bertopic">
+                <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
+                  <path d="M10 2l2 4.5 5 .7-3.5 3.4.8 5-4.3-2.3-4.3 2.3.8-5L3 7.2l5-.7L10 2z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+                </svg>
+              </span>
+              <span class="topic-method-card__body">
+                <span class="topic-method-card__name">BERTopic</span>
+                <span class="topic-method-card__desc">Embedding semantik · Lambat · Perlu GPU</span>
+              </span>
+            </button>
+
+          </div>
+
+          <p class="topic-toggle-hint topic-method-hint" id="topicMethodHint">
+            TF-IDF berjalan tanpa artefak — cocok untuk pengujian cepat.
           </p>
         </div>
 
@@ -81,6 +134,11 @@
 
       <section id="outputSection" class="card output-section hidden">
         <h2>Hasil Highlight Inline</h2>
+        <!-- Info bar: threshold + metode dari backend meta -->
+        <div id="analysisInfoBar" class="analysis-info-bar hidden">
+          <span id="infoThreshold" class="analysis-info-pill analysis-info-pill--thresh"></span>
+          <span id="infoTopicModel" class="analysis-info-pill analysis-info-pill--topic"></span>
+        </div>
         <p id="globalSummary" class="global-summary"></p>
         <div id="outputParagraphs" class="paragraph-list"></div>
       </section>
@@ -92,5 +150,35 @@
     </main>
 
     <script src="app.js" type="module"></script>
+
+    <!-- Topic card picker (berdiri sendiri, sinkron ke hidden select) -->
+    <script>
+      (function () {
+        const select  = document.getElementById('topicModelSelect');
+        const cards   = document.querySelectorAll('.topic-method-card');
+        const hintEl  = document.getElementById('topicMethodHint');
+        const HINTS = {
+          tfidf:    'TF-IDF berjalan tanpa artefak — cocok untuk pengujian cepat.',
+          lda:      'LDA memuat artefak pre-trained dari Hugging Face secara lazy saat pertama dipakai.',
+          bertopic: 'BERTopic menggunakan embedding semantik multilingual — perlu GPU, lebih lambat.',
+        };
+        function activate(val) {
+          cards.forEach(function(c) {
+            const on = c.dataset.value === val;
+            c.classList.toggle('topic-method-card--active', on);
+            c.setAttribute('aria-checked', String(on));
+          });
+          if (select) select.value = val;
+          if (hintEl) hintEl.textContent = HINTS[val] || '';
+        }
+        cards.forEach(function(c) {
+          c.addEventListener('click', function() { activate(c.dataset.value); });
+          c.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate(c.dataset.value); }
+          });
+        });
+        if (select) select.addEventListener('change', function() { activate(select.value); });
+      })();
+    </script>
   </body>
 </html>

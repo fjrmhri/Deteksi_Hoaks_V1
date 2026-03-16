@@ -157,6 +157,11 @@ const sentenceLevelToggle = document.getElementById("sentenceLevelToggle");
 const topicPerParagraphToggle = document.getElementById("topicToggle");
 const topicModelSelect = document.getElementById("topicModelSelect");
 
+// V2: info bar — threshold kalibrasi + metode topik dari meta backend
+const analysisInfoBar = document.getElementById("analysisInfoBar");
+const infoThreshold   = document.getElementById("infoThreshold");
+const infoTopicModel  = document.getElementById("infoTopicModel");
+
 const statParagraphs = document.getElementById("statParagraphs");
 const statSentences = document.getElementById("statSentences");
 const statWords = document.getElementById("statWords");
@@ -208,13 +213,13 @@ function normalizeTopicModel(rawModel) {
   const value = String(rawModel || "")
     .trim()
     .toLowerCase();
-  if (value === "nmf" || value === "bertopic" || value === "tfidf") return value;
+  if (value === "lda" || value === "bertopic" || value === "tfidf") return value;
   return "tfidf";
 }
 
 function topicModelLabel(rawModel) {
   const model = normalizeTopicModel(rawModel);
-  if (model === "nmf") return "NMF";
+  if (model === "lda") return "LDA";
   if (model === "bertopic") return "BERTopic";
   return "TF-IDF";
 }
@@ -854,6 +859,7 @@ function resetOutput() {
   if (globalSummary) globalSummary.textContent = "";
   if (outputSection) outputSection.classList.add("hidden");
   clearDebugBox();
+  if (analysisInfoBar) analysisInfoBar.classList.add("hidden");
 
   if (confidenceList) confidenceList.innerHTML = "";
   if (confidenceSummary) confidenceSummary.textContent = "Rincian Keyakinan";
@@ -1562,6 +1568,22 @@ async function handleDetect() {
       topicModel
     );
     lastPayload = payload;
+
+    // V2: tampilkan info bar threshold + metode topik dari meta backend
+    if (analysisInfoBar && infoThreshold && infoTopicModel) {
+      const meta = payload?.meta || {};
+      const th   = meta.threshold_used;
+      const tm   = normalizeTopicModel(meta.topic_model_used);
+      if (th !== undefined && th !== null) {
+        infoThreshold.textContent = `Threshold: ${Number(th).toFixed(2)} (kalibrasi val-set)`;
+        infoThreshold.classList.remove("hidden");
+      } else {
+        infoThreshold.classList.add("hidden");
+      }
+      infoTopicModel.textContent = `Metode topik: ${topicModelLabel(tm)}`;
+      infoTopicModel.classList.remove("hidden");
+      analysisInfoBar.classList.remove("hidden");
+    }
     const backendParagraphCount = Array.isArray(lastPayload?.paragraphs)
       ? lastPayload.paragraphs.length
       : 0;
