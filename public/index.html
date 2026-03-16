@@ -62,8 +62,8 @@
           <label class="control-label" for="topicModelSelect">Metode Topic Modelling</label>
           <select id="topicModelSelect" class="control-select">
             <option value="tfidf">TF-IDF — keyword statistik (cepat, tanpa artefak)</option>
-            <option value="lda">LDA — distribusi probabilistik (pre-trained HF)</option>
-            <option value="bertopic">BERTopic — embedding semantik (perlu GPU)</option>
+            <option value="lda">LDA — jika belum tersedia akan fallback ke TF-IDF</option>
+            <option value="bertopic">BERTopic — jika belum tersedia akan fallback ke TF-IDF</option>
           </select>
           <p class="topic-toggle-hint" id="topicMethodHint">
             TF-IDF berjalan tanpa artefak — cocok untuk pengujian cepat.
@@ -105,8 +105,8 @@
         const hint   = document.getElementById('topicMethodHint');
         const HINTS  = {
           tfidf:    'TF-IDF berjalan tanpa artefak — cocok untuk pengujian cepat.',
-          lda:      'LDA memuat artefak pre-trained dari Hugging Face secara lazy saat pertama dipakai.',
-          bertopic: 'BERTopic menggunakan embedding semantik multilingual — perlu GPU, lebih lambat.',
+          lda:      'LDA dipilih, tetapi jika artefak belum tersedia hasil akan otomatis fallback ke TF-IDF.',
+          bertopic: 'BERTopic dipilih, tetapi jika artefak belum tersedia hasil akan otomatis fallback ke TF-IDF.',
         };
         if (select && hint) {
           select.addEventListener('change', function () {

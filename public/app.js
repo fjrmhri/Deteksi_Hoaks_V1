@@ -224,6 +224,25 @@ function topicModelLabel(rawModel) {
   return "TF-IDF";
 }
 
+function topicFallbackReason(meta) {
+  return String(meta?.topic_fallback_reason || "").trim();
+}
+
+function resolveActiveTopicModel(meta, requestedTopicModel) {
+  const requested = normalizeTopicModel(
+    requestedTopicModel || meta?.topic_model_requested || "tfidf"
+  );
+  const usedRaw = String(meta?.topic_model_used || "").trim();
+  if (usedRaw) return normalizeTopicModel(usedRaw);
+
+  if (topicFallbackReason(meta)) return "tfidf";
+
+  // Saat backend belum mengirim topic_model_used, non-TF-IDF diasumsikan fallback ke TF-IDF.
+  if (requested !== "tfidf") return "tfidf";
+
+  return requested;
+}
+
 function cleanTopicLabel(rawLabel) {
   const label = String(rawLabel ?? "").trim();
   if (!label || label === "-") return null;
@@ -1296,10 +1315,10 @@ function renderOutputInlineWithPayload(payload, paragraphs, options = {}) {
   const topicModelRequested = normalizeTopicModel(
     options?.topicModelRequested || meta?.topic_model_requested || "tfidf"
   );
-  const topicModelUsed = normalizeTopicModel(meta?.topic_model_used || topicModelRequested);
+  const topicModelUsed = resolveActiveTopicModel(meta, topicModelRequested);
   const summaryExtraLines = [`Metode topik aktif: ${topicModelLabel(topicModelUsed)}`];
-  if (topicModelUsed !== topicModelRequested) {
-    const fallbackReason = String(meta?.topic_fallback_reason || "").trim();
+  if (topicModelUsed !== topicModelRequested || topicFallbackReason(meta)) {
+    const fallbackReason = topicFallbackReason(meta);
     summaryExtraLines.push(
       fallbackReason
         ? `Fallback topik: ${fallbackReason}`
@@ -1573,7 +1592,7 @@ async function handleDetect() {
     if (analysisInfoBar && infoThreshold && infoTopicModel) {
       const meta = payload?.meta || {};
       const th   = meta.threshold_used;
-      const tm   = normalizeTopicModel(meta.topic_model_used);
+      const tm   = resolveActiveTopicModel(meta, topicModel);
       if (th !== undefined && th !== null) {
         infoThreshold.textContent = `Threshold: ${Number(th).toFixed(2)} (kalibrasi val-set)`;
         infoThreshold.classList.remove("hidden");
