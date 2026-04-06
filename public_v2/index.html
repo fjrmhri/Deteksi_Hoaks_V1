@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Deteksi Hoaks — V2</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Crimson+Pro:ital,wght@0,400;0,600;0,700;1,400&family=DM+Sans:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+
+    <!-- Background ambient blobs -->
+    <div class="ambient" aria-hidden="true">
+      <div class="blob blob--1"></div>
+      <div class="blob blob--2"></div>
+      <div class="blob blob--3"></div>
+    </div>
+
+    <main class="app-container">
+
+      <!-- ── HEADER ────────────────────────────────────────────── -->
+      <header class="site-header">
+        <div class="site-header__eyebrow">
+          <span class="eyebrow-dot"></span>
+          <span>Sistem Analisis Berita</span>
+        </div>
+        <h1 class="site-header__title">
+          Deteksi <em>Hoaks</em>
+          <span class="v2-pill">V2</span>
+        </h1>
+        <p class="site-header__sub">
+          Powered by IndoBERT · Tiga metode topic modelling
+        </p>
+      </header>
+
+      <!-- ── INPUT CARD ────────────────────────────────────────── -->
+      <section class="card input-card">
+        <div class="card__label">01 — Masukkan Teks</div>
+
+        <div class="textarea-wrap">
+          <textarea
+            id="newsText"
+            rows="10"
+            placeholder="Tempel teks berita di sini…&#10;&#10;Sistem akan menganalisis setiap kalimat dan paragraf."
+          ></textarea>
+          <div class="textarea-corner" aria-hidden="true"></div>
+        </div>
+
+        <div id="inputStats" class="input-stats">
+          <span class="stat-pill" id="statParagraphs">
+            <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><rect x="1" y="1" width="10" height="2.5" rx="1" fill="currentColor" opacity=".5"/><rect x="1" y="5" width="7" height="2.5" rx="1" fill="currentColor" opacity=".5"/><rect x="1" y="9" width="9" height="2.5" rx="1" fill="currentColor" opacity=".5"/></svg>
+            <span>0 paragraf</span>
+          </span>
+          <span class="stat-pill" id="statSentences">
+            <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M2 3h8M2 6h5M2 9h6.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity=".5"/></svg>
+            <span>0 kalimat</span>
+          </span>
+          <span class="stat-pill" id="statWords">
+            <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><circle cx="6" cy="6" r="4.5" stroke="currentColor" stroke-width="1.5" opacity=".5"/><path d="M6 3.5v5M3.5 6h5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" opacity=".5"/></svg>
+            <span>0 kata</span>
+          </span>
+        </div>
+
+        <div class="action-row">
+          <button id="detectBtn" type="button" class="btn-detect">
+            <span id="detectLabel">Analisis Sekarang</span>
+            <span id="detectSpinner" class="spinner hidden" aria-hidden="true">
+              <svg class="spin-svg" viewBox="0 0 24 24" fill="none">
+                <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2.5" stroke-dasharray="42 14" stroke-linecap="round"/>
+              </svg>
+            </span>
+            <svg class="btn-arrow" width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <button id="resetBtn" type="button" class="btn-reset">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3 8a5 5 0 1 1 1.5 3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M3 12V8h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Reset
+          </button>
+        </div>
+      </section>
+
+      <!-- ── SETTINGS CARD ─────────────────────────────────────── -->
+      <section class="card settings-card">
+        <div class="card__label">02 — Konfigurasi Analisis</div>
+
+        <div class="toggles-row">
+          <!-- Toggle 1 -->
+          <label class="toggle-item" for="sentenceLevelToggle">
+            <div class="toggle-item__icon">
+              <svg width="18" height="18" viewBox="0 0 20 20" fill="none"><path d="M3 5h14M3 10h9M3 15h11" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+            </div>
+            <div class="toggle-item__body">
+              <span class="toggle-item__name">Deteksi per kalimat</span>
+              <span class="toggle-item__hint">ON = analisis kalimat • OFF = analisis paragraf</span>
+            </div>
+            <div class="toggle-switch-wrap">
+              <input type="checkbox" id="sentenceLevelToggle" checked />
+              <span class="toggle-track" aria-hidden="true"><span class="toggle-thumb"></span></span>
+            </div>
+          </label>
+
+          <div class="toggle-divider"></div>
+
+          <!-- Toggle 2 -->
+          <label class="toggle-item" for="topicToggle">
+            <div class="toggle-item__icon">
+              <svg width="18" height="18" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="1.6"/><circle cx="10" cy="10" r="3" stroke="currentColor" stroke-width="1.6"/></svg>
+            </div>
+            <div class="toggle-item__body">
+              <span class="toggle-item__name">Topik per paragraf</span>
+              <span class="toggle-item__hint">OFF = topik global • ON = topik tiap paragraf</span>
+            </div>
+            <div class="toggle-switch-wrap">
+              <input type="checkbox" id="topicToggle" />
+              <span class="toggle-track" aria-hidden="true"><span class="toggle-thumb"></span></span>
+            </div>
+          </label>
+        </div>
+      </section>
+
+      <!-- ── TOPIC MODEL CARD ──────────────────────────────────── -->
+      <section class="card topic-card">
+        <div class="card__label">03 — Metode Topic Modelling</div>
+
+        <!-- HIDDEN native select — dipakai JS untuk membaca nilai -->
+        <select id="topicModelSelect" class="sr-only" aria-hidden="true" tabindex="-1">
+          <option value="tfidf"    selected>TF-IDF</option>
+          <option value="lda"             >LDA</option>
+          <option value="bertopic"        >BERTopic</option>
+        </select>
+
+        <!-- Visual card picker -->
+        <div class="method-grid" role="radiogroup" aria-label="Pilih metode topic modelling">
+
+          <!-- Card: TF-IDF -->
+          <button
+            type="button"
+            class="method-card method-card--active"
+            data-value="tfidf"
+            role="radio"
+            aria-checked="true"
+            aria-label="TF-IDF"
+          >
+            <div class="method-card__glow"></div>
+            <div class="method-card__header">
+              <div class="method-card__icon method-card__icon--tfidf">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                  <path d="M3 6h18M3 12h12M3 18h15" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                  <path d="M17 15l3 3-3 3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </div>
+              <div class="method-card__badges">
+                <span class="badge badge--speed">⚡ Instan</span>
+                <span class="badge badge--type">Statistik</span>
+              </div>
+            </div>
+            <div class="method-card__name">TF-IDF</div>
+            <div class="method-card__full">Term Frequency–Inverse Document Frequency</div>
+            <div class="method-card__desc">
+              Keyword berbasis frekuensi. Tidak perlu model tambahan, berjalan langsung in-process.
+            </div>
+            <div class="method-card__check" aria-hidden="true">
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6" fill="currentColor"/><path d="M4.5 7l2 2 3-3.5" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+          </button>
+
+          <!-- Card: LDA -->
+          <button
+            type="button"
+            class="method-card"
+            data-value="lda"
+            role="radio"
+            aria-checked="false"
+            aria-label="LDA – Latent Dirichlet Allocation"
+          >
+            <div class="method-card__glow"></div>
+            <div class="method-card__header">
+              <div class="method-card__icon method-card__icon--lda">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                  <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/>
+                  <path d="M12 3c0 0 4 4 4 9s-4 9-4 9" stroke="currentColor" stroke-width="1.6"/>
+                  <path d="M12 3c0 0-4 4-4 9s4 9 4 9" stroke="currentColor" stroke-width="1.6"/>
+                  <path d="M3 12h18" stroke="currentColor" stroke-width="1.6"/>
+                </svg>
+              </div>
+              <div class="method-card__badges">
+                <span class="badge badge--speed">⚡ Cepat</span>
+                <span class="badge badge--type">Probabilistik</span>
+              </div>
+            </div>
+            <div class="method-card__name">LDA</div>
+            <div class="method-card__full">Latent Dirichlet Allocation</div>
+            <div class="method-card__desc">
+              Distribusi topik probabilistik. Menggunakan artefak pre-trained dari Hugging Face.
+            </div>
+            <div class="method-card__check" aria-hidden="true">
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6" fill="currentColor"/><path d="M4.5 7l2 2 3-3.5" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+          </button>
+
+          <!-- Card: BERTopic -->
+          <button
+            type="button"
+            class="method-card"
+            data-value="bertopic"
+            role="radio"
+            aria-checked="false"
+            aria-label="BERTopic"
+          >
+            <div class="method-card__glow"></div>
+            <div class="method-card__header">
+              <div class="method-card__icon method-card__icon--bertopic">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                  <path d="M12 3l2.5 5 5.5.8-4 3.9.9 5.5L12 15.6l-4.9 2.6.9-5.5L4 8.8l5.5-.8L12 3z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+                </svg>
+              </div>
+              <div class="method-card__badges">
+                <span class="badge badge--speed">🐢 Lambat</span>
+                <span class="badge badge--type badge--semantic">Semantik</span>
+              </div>
+            </div>
+            <div class="method-card__name">BERTopic</div>
+            <div class="method-card__full">Contextual Embedding Topics</div>
+            <div class="method-card__desc">
+              Embedding multilingual + UMAP + HDBSCAN. Paling kaya makna, butuh GPU.
+            </div>
+            <div class="method-card__check" aria-hidden="true">
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6" fill="currentColor"/><path d="M4.5 7l2 2 3-3.5" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+          </button>
+
+        </div>
+
+        <!-- Hint bar -->
+        <div class="method-hint-bar" id="topicMethodHint" aria-live="polite">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.4"/><path d="M8 7v5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="5" r=".8" fill="currentColor"/></svg>
+          <span id="topicMethodHintText">TF-IDF berjalan tanpa artefak model — cocok untuk deployment minimal.</span>
+        </div>
+      </section>
+
+      <!-- ── LEGEND ────────────────────────────────────────────── -->
+      <div class="legend-row" aria-label="Keterangan warna">
+        <span class="legend-item legend-item--green">
+          <span class="legend-dot"></span> Fakta
+        </span>
+        <span class="legend-item legend-item--red">
+          <span class="legend-dot"></span> Hoaks
+        </span>
+        <span class="legend-item legend-item--orange">
+          <span class="legend-dot"></span> Ragu &lt;65%
+        </span>
+      </div>
+
+      <!-- ── ERROR ─────────────────────────────────────────────── -->
+      <div id="errorBox" class="error-box hidden" role="alert">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.4"/><path d="M8 5v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="11.5" r=".8" fill="currentColor"/></svg>
+        <span></span>
+      </div>
+
+      <!-- ── OUTPUT ─────────────────────────────────────────────── -->
+      <section id="outputSection" class="card output-card hidden">
+        <div class="card__label">Hasil Analisis</div>
+        <div id="globalSummary" class="global-summary"></div>
+        <div id="outputParagraphs" class="paragraph-list"></div>
+      </section>
+
+      <!-- ── CONFIDENCE DETAILS ────────────────────────────────── -->
+      <details id="confidenceDetails" class="card confidence-card hidden">
+        <summary id="confidenceSummary" class="confidence-summary">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          Rincian Keyakinan
+        </summary>
+        <ul id="confidenceList" class="confidence-list"></ul>
+      </details>
+
+    </main>
+
+    <script src="app.js" type="module"></script>
+
+    <!-- Topic card picker logic (inline, tidak bergantung app.js) -->
+    <script>
+      (function () {
+        const select = document.getElementById('topicModelSelect');
+        const cards  = document.querySelectorAll('.method-card');
+        const hintEl = document.getElementById('topicMethodHintText');
+
+        const HINTS = {
+          tfidf:    'TF-IDF berjalan tanpa artefak model — cocok untuk deployment minimal.',
+          lda:      'LDA memuat artefak pre-trained dari Hugging Face secara lazy (pertama kali digunakan).',
+          bertopic: 'BERTopic menggunakan embedding semantik — perlu GPU dan model BERTopic dari Hugging Face.',
+        };
+
+        function activate(value) {
+          cards.forEach(function (card) {
+            const isActive = card.dataset.value === value;
+            card.classList.toggle('method-card--active', isActive);
+            card.setAttribute('aria-checked', String(isActive));
+          });
+          if (select) select.value = value;
+          if (hintEl)  hintEl.textContent = HINTS[value] || '';
+        }
+
+        cards.forEach(function (card) {
+          card.addEventListener('click', function () {
+            activate(card.dataset.value);
+          });
+          card.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              activate(card.dataset.value);
+            }
+          });
+        });
+
+        // Reflect changes if JS in app.js ever changes the select
+        if (select) {
+          select.addEventListener('change', function () {
+            activate(select.value);
+          });
+        }
+      })();
+    </script>
+
+  </body>
+</html>
