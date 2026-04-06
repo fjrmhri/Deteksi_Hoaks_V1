@@ -157,7 +157,6 @@ const sentenceLevelToggle = document.getElementById("sentenceLevelToggle");
 const topicPerParagraphToggle = document.getElementById("topicToggle");
 const topicModelSelect = document.getElementById("topicModelSelect");
 
-// V2: info bar — threshold kalibrasi + metode topik dari meta backend
 const analysisInfoBar = document.getElementById("analysisInfoBar");
 const infoThreshold   = document.getElementById("infoThreshold");
 const infoTopicModel  = document.getElementById("infoTopicModel");
@@ -229,17 +228,15 @@ function topicFallbackReason(meta) {
 }
 
 function resolveActiveTopicModel(meta, requestedTopicModel) {
+  // [SYNC] Baca topic_model_used langsung dari meta backend (field baru v1.4.0)
+  const usedFromMeta = String(meta?.topic_model_used || "").trim();
+  if (usedFromMeta) return normalizeTopicModel(usedFromMeta);
+
   const requested = normalizeTopicModel(
     requestedTopicModel || meta?.topic_model_requested || "tfidf"
   );
-  const usedRaw = String(meta?.topic_model_used || "").trim();
-  if (usedRaw) return normalizeTopicModel(usedRaw);
-
   if (topicFallbackReason(meta)) return "tfidf";
-
-  // Saat backend belum mengirim topic_model_used, non-TF-IDF diasumsikan fallback ke TF-IDF.
   if (requested !== "tfidf") return "tfidf";
-
   return requested;
 }
 
@@ -301,7 +298,6 @@ function extractTopicFromObject(topicLike) {
 function extractTopicFromParagraph(paragraph) {
   const safe = paragraph && typeof paragraph === "object" ? paragraph : {};
 
-  // 0) compatibility path (legacy): paragraph.topic.label + paragraph.topic.score
   if (safe.topic && typeof safe.topic === "object") {
     const rawLabel = typeof safe.topic.label === "string" ? safe.topic.label.trim() : "";
     if (rawLabel) {
@@ -312,7 +308,6 @@ function extractTopicFromParagraph(paragraph) {
     }
   }
 
-  // 1) paragraph.topic.label + paragraph.topic.score (generic)
   if (safe.topic && typeof safe.topic === "object") {
     const topicObject = extractTopicFromObject({
       label: safe.topic.label,
@@ -325,7 +320,6 @@ function extractTopicFromParagraph(paragraph) {
     if (label) return { label, score: null };
   }
 
-  // 2) paragraph.topics.items[0].topic_label + probability/score
   let firstTopicItem = null;
   if (safe.topics && typeof safe.topics === "object" && Array.isArray(safe.topics.items)) {
     firstTopicItem = safe.topics.items[0];
@@ -358,7 +352,6 @@ function extractTopicFromParagraph(paragraph) {
     if (itemTopic.label) return itemTopic;
   }
 
-  // additional object variants
   const extraTopicObjects = [
     safe.topic_info,
     safe.topic_prediction,
@@ -370,7 +363,6 @@ function extractTopicFromParagraph(paragraph) {
     if (extracted.label) return extracted;
   }
 
-  // 3) paragraph.topic_label + paragraph.topic_score/topic_probability
   const flatLabel = firstTopicLabel(safe.topic_label, safe.topicLabel);
   if (flatLabel) {
     return {
@@ -387,7 +379,6 @@ function extractTopicFromParagraph(paragraph) {
     };
   }
 
-  // 4) paragraph.topicName / paragraph.topicScore
   const camelLabel = firstTopicLabel(safe.topicName);
   if (camelLabel) {
     return {
@@ -409,7 +400,6 @@ function extractTopicFromParagraph(paragraph) {
 function extractGlobalTopic(payload) {
   const safe = payload && typeof payload === "object" ? payload : {};
 
-  // 1) payload.topics_global
   const topicsGlobal = safe.topics_global;
   if (typeof topicsGlobal === "string") {
     const label = cleanTopicLabel(topicsGlobal);
@@ -438,7 +428,6 @@ function extractGlobalTopic(payload) {
     if (fromArray.label) return fromArray;
   }
 
-  // 2) payload.topics (enabled + items[0])
   const topics = safe.topics;
   if (topics && typeof topics === "object") {
     if (Array.isArray(topics.items) && topics.items.length > 0) {
@@ -456,7 +445,6 @@ function extractGlobalTopic(payload) {
     if (fromArray.label) return fromArray;
   }
 
-  // 3) payload.topic / payload.topic_label
   if (typeof safe.topic === "string") {
     const label = cleanTopicLabel(safe.topic);
     if (label) {
@@ -706,9 +694,14 @@ function renderTopicDebug(payload, globalTopic, model, options = {}) {
       : "Topik terdeteksi dari payload.";
   const fallbackLine = `isFallback=${Boolean(options?.isFallback)}`;
 
+  // [SYNC] Tambah info topic_model_used dari meta backend
+  const metaTopicModel = payload?.meta?.topic_model_used || "unknown";
+
   box.textContent = [
     "[DEBUG topic]",
     fallbackLine,
+    `topic_model_used (meta): ${metaTopicModel}`,
+    `threshold_used (meta): ${payload?.meta?.threshold_used ?? "null"}`,
     `payload keys: ${topKeys.join(", ") || "-"}`,
     `paragraph[0] keys: ${paragraph0Keys.join(", ") || "-"}`,
     `global keysHas: topics=${globalPresence.topics} topics_global=${globalPresence.topics_global} topic=${globalPresence.topic} topic_label=${globalPresence.topic_label} topic_info=${globalPresence.topic_info} topic_prediction=${globalPresence.topic_prediction}`,
@@ -912,6 +905,7 @@ async function callAnalyzeApi(text, topicPerParagraph, sentenceLevel, topicModel
   };
 
   try {
+    // Request utama — tanpa topic_model (backend v1.4.0 tidak perlu field ini)
     let response = await fetchWithTimeout(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -919,23 +913,10 @@ async function callAnalyzeApi(text, topicPerParagraph, sentenceLevel, topicModel
         text,
         topic_per_paragraph: Boolean(topicPerParagraph),
         sentence_level: sentenceLevel !== false,
-        topic_model: normalizeTopicModel(topicModel),
       }),
     });
 
-    // Kompatibilitas backend lama: coba lagi tanpa topic_model, lalu fallback penuh.
-    if (response.status === 422) {
-      response = await fetchWithTimeout(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          text,
-          topic_per_paragraph: Boolean(topicPerParagraph),
-          sentence_level: sentenceLevel !== false,
-        }),
-      });
-    }
-
+    // Fallback jika 422
     if (response.status === 422) {
       response = await fetchWithTimeout(endpoint, {
         method: "POST",
@@ -1311,20 +1292,12 @@ function renderOutputInlineWithPayload(payload, paragraphs, options = {}) {
         ? `${globalTopicLabel} (${formatPercent(globalTopicScore)})`
         : globalTopicLabel;
   }
+
+  // [SYNC] Baca topic_model_used dari meta backend (field baru v1.4.0)
   const meta = payload && typeof payload === "object" ? payload.meta : null;
-  const topicModelRequested = normalizeTopicModel(
-    options?.topicModelRequested || meta?.topic_model_requested || "tfidf"
-  );
-  const topicModelUsed = resolveActiveTopicModel(meta, topicModelRequested);
+  const topicModelUsed = resolveActiveTopicModel(meta, options?.topicModelRequested || "tfidf");
   const summaryExtraLines = [`Metode topik aktif: ${topicModelLabel(topicModelUsed)}`];
-  if (topicModelUsed !== topicModelRequested || topicFallbackReason(meta)) {
-    const fallbackReason = topicFallbackReason(meta);
-    summaryExtraLines.push(
-      fallbackReason
-        ? `Fallback topik: ${fallbackReason}`
-        : `Fallback topik: backend memakai ${topicModelLabel(topicModelUsed)}.`
-    );
-  }
+
   globalSummary.innerHTML = buildGlobalSummaryMarkup(
     summaryModel,
     globalTopicText,
@@ -1345,13 +1318,13 @@ function renderOutputInlineWithPayload(payload, paragraphs, options = {}) {
     const block = document.createElement("article");
     block.className = "paragraph-block";
 
-    const meta = document.createElement("p");
-    meta.className = "paragraph-meta";
+    const metaEl = document.createElement("p");
+    metaEl.className = "paragraph-meta";
     if (topicPerParagraph) {
       const topicMetaText = formatTopicMeta(item.topicLabel, item.topicScore);
-      meta.textContent = `Paragraf ${item.paragraphNumber} • ${topicMetaText}`;
+      metaEl.textContent = `Paragraf ${item.paragraphNumber} • ${topicMetaText}`;
     } else {
-      meta.textContent = `Paragraf ${item.paragraphNumber}`;
+      metaEl.textContent = `Paragraf ${item.paragraphNumber}`;
     }
 
     const text = document.createElement("p");
@@ -1379,7 +1352,7 @@ function renderOutputInlineWithPayload(payload, paragraphs, options = {}) {
       }
     }
 
-    block.appendChild(meta);
+    block.appendChild(metaEl);
     block.appendChild(text);
     fragment.appendChild(block);
   });
@@ -1588,11 +1561,12 @@ async function handleDetect() {
     );
     lastPayload = payload;
 
-    // V2: tampilkan info bar threshold + metode topik dari meta backend
+    // [SYNC] Tampilkan info bar threshold + topic model dari meta backend (v1.4.0)
     if (analysisInfoBar && infoThreshold && infoTopicModel) {
       const meta = payload?.meta || {};
       const th   = meta.threshold_used;
       const tm   = resolveActiveTopicModel(meta, topicModel);
+
       if (th !== undefined && th !== null) {
         infoThreshold.textContent = `Threshold: ${Number(th).toFixed(2)} (kalibrasi val-set)`;
         infoThreshold.classList.remove("hidden");
@@ -1603,6 +1577,7 @@ async function handleDetect() {
       infoTopicModel.classList.remove("hidden");
       analysisInfoBar.classList.remove("hidden");
     }
+
     const backendParagraphCount = Array.isArray(lastPayload?.paragraphs)
       ? lastPayload.paragraphs.length
       : 0;

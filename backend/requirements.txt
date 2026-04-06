@@ -8,3 +8,4 @@ pydantic
 scikit-learn
 huggingface_hub
 bertopic
+sentence-transformers
