@@ -68,6 +68,7 @@
             OFF: Topik global dokumen • ON: Topik per paragraf
           </p>
         </div>
+
         <p class="legend-note">
           <span class="legend legend--green">Hijau</span> = Fakta,
           <span class="legend legend--red">Merah</span> = Hoaks,
@@ -106,24 +107,5 @@
     </main>
 
     <script src="app.js" type="module"></script>
-
-    <!-- Update hint text saat dropdown berubah -->
-    <script>
-      (function () {
-        const select = document.getElementById("topicModelSelect");
-        const hint = document.getElementById("topicMethodHint");
-        const HINTS = {
-          tfidf: "TF-IDF berjalan tanpa artefak — cocok untuk pengujian cepat.",
-          lda: "LDA dipilih, tetapi jika artefak belum tersedia hasil akan otomatis fallback ke TF-IDF.",
-          bertopic:
-            "BERTopic dipilih, tetapi jika artefak belum tersedia hasil akan otomatis fallback ke TF-IDF.",
-        };
-        if (select && hint) {
-          select.addEventListener("change", function () {
-            hint.textContent = HINTS[select.value] || "";
-          });
-        }
-      })();
-    </script>
   </body>
 </html>
