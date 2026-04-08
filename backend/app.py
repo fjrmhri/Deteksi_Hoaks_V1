@@ -1,16 +1,35 @@
 """
-Indo Hoax Detector API — v2.0.0
-Changelog v2.0.0:
-  [FIX-MAJOR-1] Paragraph label aggregation: majority vote (n_hoax > n_not_hoax),
-                 bukan "any hoax → hoaks". Ini adalah root cause "selalu hoaks".
-  [FIX-MAJOR-2] sentence_aggregate_label: majority vote, bukan "any hoax".
-  [FIX-MAJOR-3] BERTopic.transform kini menerima IndoBERT CLS embeddings secara
-                 eksplisit — model dilatih tanpa embedding_model, transform tanpa
-                 embeddings akan error/salah.
-  [FIX-4]       Hapus seluruh TF-IDF fallback. Backend hanya BERTopic.
-  [FIX-5]       topic_model_used selalu "bertopic" di meta response.
-  [FIX-6]       Hardcode ID2LABEL sesuai training (0=not_hoax, 1=hoax).
-  [FIX-7]       Debug logging logits + probabilities aktif via ENABLE_HOAX_LOGGING=1.
+Indo Hoax Detector API — v3.0.0
+
+ROOT CAUSE yang diperbaiki (berdasarkan analisis Final.ipynb + app.py):
+
+[RC-1] TOPIC MULTI-PARAGRAF SALAH:
+  Sumber: endpoint /analyze, blok `else` (topic_per_paragraph=False):
+    doc_for_topic = "\n\n".join(paragraph_texts)   ← SALAH
+    global_list = _bertopic_infer_topics([doc_for_topic])
+  Efek: semua paragraf digabung jadi 1 string → BERTopic proses 1 dokumen
+  tunggal → kata TF-IDF dari gabungan menjadi "pangan / meningkatkan".
+  Fix: topic_per_paragraph SELALU True secara internal — setiap paragraf
+  diproses independen, hasilnya di-aggregate untuk global topic.
+
+[RC-2] NAMA TOPIK DARI TF-IDF, BUKAN KATEGORI UTAMA:
+  Sumber: _bertopic_infer_topics — label diambil dari get_topic(tid):
+    label = " / ".join(keywords[:2])  → "menteri / tiba"
+  seed_topic_list hanya soft guidance untuk clustering, bukan nama output.
+  Fix: tambah _kategorisasi_teks() — rule-based hard mapping yang selalu
+  override output BERTopic jika ada keyword match.
+
+[RC-3] THRESHOLD 0.39 MENYEBABKAN FALSE POSITIVE TINGGI:
+  Data: label_0=160221 (93.1%), label_1=11953 (6.9%) → imbalance 1:13.4
+  Training oversample hoax ke 1:1, tapi inference pakai threshold 0.39
+  dari kalibrasi val-set (keseluruhan dokumen, bukan per-kalimat).
+  Kalimat pendek tidak representatif → probabilitas hoax tinggi secara
+  artefak → false positive naik.
+  Fix: THRESH_KALIMAT_PENDEK=0.65 khusus kalimat < MIN_KATA_KALIMAT kata.
+  Threshold dokumen tetap dari inference_config.json (0.39).
+
+[RC-4] topic_per_paragraph=False → topics_global tidak representatif:
+  Fix: jika False, ambil topik mayoritas dari per-paragraf, bukan gabung teks.
 """
 
 import json
@@ -18,8 +37,7 @@ import os
 import random
 import re
 import threading
-from collections import defaultdict
-from pathlib import Path
+from collections import Counter, defaultdict
 from threading import Lock
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -34,25 +52,30 @@ from transformers import AutoModelForSequenceClassification, AutoTokenizer
 # Konfigurasi
 # =========================
 
-MODEL_ID         = os.getenv("MODEL_ID", "fjrmhri/deteksi_hoaks_indobert")
-SUBFOLDER        = os.getenv("MODEL_SUBFOLDER", "") or None
-MAX_LENGTH       = int(os.getenv("MAX_LENGTH", "256"))
+MODEL_ID        = os.getenv("MODEL_ID", "fjrmhri/deteksi_hoaks_indobert")
+SUBFOLDER       = os.getenv("MODEL_SUBFOLDER", "") or None
+MAX_LENGTH      = int(os.getenv("MAX_LENGTH", "256"))
 
-THRESH_HIGH      = float(os.getenv("HOAX_THRESH_HIGH", "0.80"))
-THRESH_MED       = float(os.getenv("HOAX_THRESH_MED",  "0.50"))
+THRESH_HIGH     = float(os.getenv("HOAX_THRESH_HIGH", "0.80"))
+THRESH_MED      = float(os.getenv("HOAX_THRESH_MED",  "0.50"))
 
-PREDICT_BATCH_SIZE    = int(os.getenv("PREDICT_BATCH_SIZE", "64"))
-SENTENCE_BATCH_SIZE   = int(os.getenv("SENTENCE_BATCH_SIZE", "64"))
-SENTENCE_AMBER_CONF   = float(os.getenv("SENTENCE_AMBER_CONF", "0.70"))
-BERTOPIC_EMBED_BATCH  = int(os.getenv("BERTOPIC_EMBED_BATCH", "32"))
+# [RC-3] Threshold kalimat pendek — kalimat < MIN_KATA_KALIMAT kata
+# menggunakan threshold lebih tinggi agar tidak false positive
+MIN_KATA_KALIMAT      = int(os.getenv("MIN_KATA_KALIMAT", "8"))
+THRESH_KALIMAT_PENDEK = float(os.getenv("THRESH_KALIMAT_PENDEK", "0.65"))
 
-TOPIC_KEYWORDS_TOPK      = int(os.getenv("TOPIC_KEYWORDS_TOPK", "3"))
-TOPIC_BERTOPIC_MODEL_ID  = os.getenv(
+PREDICT_BATCH_SIZE   = int(os.getenv("PREDICT_BATCH_SIZE", "64"))
+SENTENCE_BATCH_SIZE  = int(os.getenv("SENTENCE_BATCH_SIZE", "64"))
+SENTENCE_AMBER_CONF  = float(os.getenv("SENTENCE_AMBER_CONF", "0.70"))
+BERTOPIC_EMBED_BATCH = int(os.getenv("BERTOPIC_EMBED_BATCH", "32"))
+
+TOPIC_KEYWORDS_TOPK     = int(os.getenv("TOPIC_KEYWORDS_TOPK", "3"))
+TOPIC_BERTOPIC_MODEL_ID = os.getenv(
     "TOPIC_BERTOPIC_MODEL_ID", "fjrmhri/deteksi_hoaks_bertopic"
 ).strip()
 
-ENABLE_LOGGING   = os.getenv("ENABLE_HOAX_LOGGING", "0") == "1"
-LOG_SAMPLE_RATE  = float(os.getenv("HOAX_LOG_SAMPLE_RATE", "0.2"))
+ENABLE_LOGGING  = os.getenv("ENABLE_HOAX_LOGGING", "0") == "1"
+LOG_SAMPLE_RATE = float(os.getenv("HOAX_LOG_SAMPLE_RATE", "0.2"))
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 if torch.cuda.is_available():
@@ -61,8 +84,8 @@ if torch.cuda.is_available():
 print("======================================")
 print(f"Loading IndoBERT dari Hub: {MODEL_ID}")
 print(f"Device              : {DEVICE}")
-print(f"MAX_LENGTH          : {MAX_LENGTH}")
 print(f"THRESH_HIGH/MED     : {THRESH_HIGH} / {THRESH_MED}")
+print(f"THRESH_KALIMAT_PENDEK: {THRESH_KALIMAT_PENDEK} (< {MIN_KATA_KALIMAT} kata)")
 print("======================================")
 
 
@@ -71,16 +94,16 @@ print("======================================")
 # =========================
 
 def _load_model_artifacts():
-    load_kwargs = {}
+    kw = {}
     if SUBFOLDER:
-        load_kwargs["subfolder"] = SUBFOLDER
+        kw["subfolder"] = SUBFOLDER
     try:
-        tok = AutoTokenizer.from_pretrained(MODEL_ID, **load_kwargs)
-        mdl = AutoModelForSequenceClassification.from_pretrained(MODEL_ID, **load_kwargs)
+        tok = AutoTokenizer.from_pretrained(MODEL_ID, **kw)
+        mdl = AutoModelForSequenceClassification.from_pretrained(MODEL_ID, **kw)
         return tok, mdl
     except Exception as e:
         if SUBFOLDER:
-            print(f"[WARN] Gagal load subfolder='{SUBFOLDER}', retry tanpa subfolder: {e}")
+            print(f"[WARN] Gagal load subfolder='{SUBFOLDER}', retry: {e}")
             tok = AutoTokenizer.from_pretrained(MODEL_ID)
             mdl = AutoModelForSequenceClassification.from_pretrained(MODEL_ID)
             return tok, mdl
@@ -91,30 +114,154 @@ tokenizer, model = _load_model_artifacts()
 model.to(DEVICE)
 model.eval()
 
-# [FIX-6] Hardcode ID2LABEL sesuai training:
-#   label_ke_id = {"not_hoax": 0, "hoax": 1} → ID2LABEL = {0: "not_hoax", 1: "hoax"}
+# Hardcode ID2LABEL sesuai training: label_ke_id = {"not_hoax": 0, "hoax": 1}
 ID2LABEL: Dict[int, str] = {0: "not_hoax", 1: "hoax"}
 
 _config_id2label = {}
 if getattr(model.config, "id2label", None):
     _config_id2label = {int(k): v for k, v in model.config.id2label.items()}
 if _config_id2label and _config_id2label != ID2LABEL:
-    print(f"[WARN] model.config.id2label={_config_id2label} != hardcoded {ID2LABEL}")
-    print("[WARN] Menggunakan hardcoded ID2LABEL.")
-else:
-    print(f"[INFO] ID2LABEL: {ID2LABEL}")
+    print(f"[WARN] config.id2label={_config_id2label} != hardcoded {ID2LABEL}. Pakai hardcoded.")
 
-# Baca threshold_optimal dari inference_config.json (opsional)
-_THRESHOLD_OPTIMAL: float = 0.5
+# Baca threshold_optimal dari inference_config.json
+# Dari notebook: THRESHOLD_OPTIMAL = 0.39 (F1=0.9877 @val)
+_THRESHOLD_OPTIMAL: float = 0.39  # default dari notebook jika file tidak ada
 try:
     from huggingface_hub import hf_hub_download
     _cfg_path = hf_hub_download(MODEL_ID, "inference_config.json")
     with open(_cfg_path, encoding="utf-8") as _f:
         _inf_cfg = json.load(_f)
-    _THRESHOLD_OPTIMAL = float(_inf_cfg.get("threshold_optimal", 0.5))
+    _THRESHOLD_OPTIMAL = float(_inf_cfg.get("threshold_optimal", 0.39))
     print(f"[INFO] threshold_optimal dari inference_config.json: {_THRESHOLD_OPTIMAL}")
 except Exception as _e:
-    print(f"[INFO] inference_config.json tidak tersedia ({_e}). Pakai 0.5")
+    print(f"[INFO] inference_config.json tidak tersedia ({_e}). Pakai {_THRESHOLD_OPTIMAL}")
+
+
+# =========================
+# Hard Mapping Kategori — [RC-2]
+# Urutan = prioritas (Kriminal & Hukum didahulukan karena keyword overlap tinggi)
+# =========================
+
+PETA_KATEGORI: List[Tuple[str, set]] = [
+    ("Kriminal & Hukum", {
+        "polisi", "tersangka", "pengadilan", "hukum", "penjara", "korupsi",
+        "kpk", "pembunuhan", "penipuan", "sidang", "vonis", "kriminal",
+        "penyidikan", "jaksa", "hakim", "ditangkap", "ditahan", "terdakwa",
+        "dakwaan", "kejaksaan", "mahkamah", "peradilan", "pidana", "perdata",
+    }),
+    ("Politik", {
+        "pemilu", "pilkada", "dpr", "partai", "kampanye", "bawaslu", "kpu",
+        "pilpres", "caleg", "koalisi", "oposisi", "legislasi", "debat",
+        "konstitusi", "suara", "demokrat", "golkar", "pdip", "gerindra",
+        "pks", "pks", "dpd", "mpr", "fraksi", "legislatif", "senator",
+    }),
+    ("Nasional & Pemerintahan", {
+        "kementerian", "menteri", "kebijakan", "asn", "pns", "pemerintah",
+        "presiden", "ibukota", "otonomi", "daerah", "regulasi", "proyek",
+        "pembangunan", "gubernur", "bupati", "walikota", "dprd", "pemda",
+        "anggaran", "apbn", "apbd", "perpres", "perda", "instruksi",
+        "kabinet", "wapres", "sekretaris", "jokowi", "prabowo",
+    }),
+    ("Ekonomi & Bisnis", {
+        "ekonomi", "saham", "investasi", "inflasi", "bank", "keuangan",
+        "pajak", "ihsg", "umkm", "harga", "pasar", "ekspor", "impor",
+        "startup", "bisnis", "perdagangan", "rupiah", "dolar", "kurs",
+        "bi", "ojk", "bumn", "swasta", "perusahaan", "modal", "aset",
+        "defisit", "surplus", "neraca", "pdb", "gdp",
+    }),
+    ("Kesehatan", {
+        "kesehatan", "penyakit", "rumah sakit", "dokter", "virus", "vaksin",
+        "obat", "bpjs", "pandemi", "medis", "gejala", "terapi", "pasien",
+        "klinis", "covid", "rs", "kemenkes", "epidemi", "wabah", "imunisasi",
+        "apotek", "farmasi", "faskes", "puskesmas", "nakes",
+    }),
+    ("Teknologi & Sains", {
+        "teknologi", "internet", "aplikasi", "digital", "siber", "hacker",
+        "inovasi", "satelit", "algoritma", "data", "ai", "kecerdasan",
+        "buatan", "software", "hardware", "smartphone", "kominfo", "server",
+        "startup", "platform", "cloud", "robot", "elektrik",
+    }),
+    ("Bencana & Cuaca", {
+        "gempa", "banjir", "cuaca", "bmkg", "tsunami", "longsor", "erupsi",
+        "badai", "evakuasi", "korban", "mitigasi", "iklim", "hujan", "angin",
+        "kebakaran", "bencana", "bnpb", "bpbd", "kekeringan", "rob",
+        "topan", "puting beliung",
+    }),
+    ("Olahraga", {
+        "olahraga", "sepakbola", "futsal", "basket", "bulutangkis", "atlet",
+        "turnamen", "medali", "piala", "fifa", "aff", "liga", "stadion",
+        "pertandingan", "klub", "pssi", "pbsi", "olimpiade", "sea games",
+        "renang", "voli", "tenis", "badminton", "pemain", "pelatih",
+    }),
+    ("Internasional", {
+        "luar negeri", "global", "diplomasi", "perang", "konflik", "pbb",
+        "nato", "geopolitik", "internasional", "sanksi", "asean", "g20",
+        "uni eropa", "as", "china", "rusia", "israel", "palestina",
+        "kedutaan", "konsulat", "wna", "visa",
+    }),
+    ("Pendidikan", {
+        "sekolah", "guru", "siswa", "mahasiswa", "kampus", "universitas",
+        "beasiswa", "kurikulum", "ujian", "akademik", "pembelajaran", "riset",
+        "kemendikbud", "un", "snbp", "snbt", "sma", "smp", "sd", "dosen",
+        "rektor", "fakultas", "prodi",
+    }),
+    ("Transportasi & Infrastruktur", {
+        "jalan", "tol", "kereta", "bandara", "pelabuhan", "transportasi",
+        "kendaraan", "logistik", "mrt", "lrt", "bus", "pesawat", "kapal",
+        "terminal", "stasiun", "garuda", "kemenhub",
+    }),
+    ("Lingkungan & Energi", {
+        "lingkungan", "energi", "listrik", "minyak", "gas", "emisi",
+        "polusi", "renewable", "tambang", "pln", "pertamina", "karbon",
+        "hutan", "deforestasi", "sawit", "sungai", "laut", "sampah",
+    }),
+    ("Hiburan & Gaya Hidup", {
+        "artis", "film", "musik", "konser", "selebritas", "bioskop", "drama",
+        "viral", "sinetron", "festival", "influencer", "lifestyle", "seleb",
+        "youtube", "instagram", "tiktok", "sosmed", "kuliner", "wisata",
+    }),
+]
+
+PETA_KATEGORI_SET: Dict[str, set] = {nama: kw for nama, kw in PETA_KATEGORI}
+
+
+def _kategorisasi_teks(teks: str) -> Optional[Tuple[str, float]]:
+    """
+    Rule-based hard mapping: keyword matching → nama kategori.
+    Return (nama_kategori, skor_hit) atau None jika tidak cocok.
+    Skor = jumlah_hit / max(total_token, 1).
+    Kategori pertama di PETA_KATEGORI dengan skor tertinggi yang menang.
+    """
+    teks_lower = teks.lower()
+    # Bersihkan tanda baca, buat set token untuk matching kata tunggal
+    teks_clean = re.sub(r"[^\w\s]", " ", teks_lower)
+    token_set  = set(teks_clean.split())
+    total      = max(len(token_set), 1)
+
+    best_nama: Optional[str] = None
+    best_skor: float = 0.0
+
+    for nama, kata_kunci in PETA_KATEGORI:
+        hit = 0
+        for kw in kata_kunci:
+            if " " in kw:
+                # Frasa multi-kata: substring match di teks asli
+                if kw in teks_lower:
+                    hit += 1
+            else:
+                # Kata tunggal: exact token match
+                if kw in token_set:
+                    hit += 1
+        if hit == 0:
+            continue
+        skor = hit / total
+        if skor > best_skor:
+            best_skor = skor
+            best_nama = nama
+
+    if best_nama is None:
+        return None
+    return best_nama, _round6(best_skor)
 
 
 # =========================
@@ -137,7 +284,7 @@ def _load_bertopic_background():
             _bertopic_model = BERTopic.load(TOPIC_BERTOPIC_MODEL_ID)
             print("[INFO] BERTopic berhasil dimuat.")
         except Exception as e:
-            print(f"[WARN] Gagal load BERTopic: {e}. Topic inference tidak tersedia.")
+            print(f"[WARN] Gagal load BERTopic: {e}.")
             _bertopic_model = None
         finally:
             _bertopic_ready = True
@@ -152,13 +299,12 @@ def _get_bertopic() -> Optional[Any]:
 
 
 # =========================
-# FastAPI setup
+# FastAPI
 # =========================
 
 app = FastAPI(
     title="Indo Hoax Detector API",
-    description="API FastAPI untuk deteksi berita hoaks (IndoBERT + BERTopic).",
-    version="2.0.0",
+    version="3.0.0",
 )
 
 app.add_middleware(
@@ -177,10 +323,8 @@ app.add_middleware(
 class PredictRequest(BaseModel):
     text: str
 
-
 class BatchPredictRequest(BaseModel):
     texts: List[str]
-
 
 class PredictResponse(BaseModel):
     label: str
@@ -190,23 +334,19 @@ class PredictResponse(BaseModel):
     risk_level: str
     risk_explanation: str
 
-
 class BatchPredictResponse(BaseModel):
     results: List[PredictResponse]
-
 
 class AnalyzeRequest(BaseModel):
     text: str
     topic_per_paragraph: bool = False
     sentence_level: bool = True
 
-
 class DocumentSummary(BaseModel):
     paragraph_count: int
     sentence_count: int
     hoax_sentence_count: int
     not_hoax_sentence_count: int
-
 
 class DocumentAnalysis(BaseModel):
     label: str
@@ -217,12 +357,10 @@ class DocumentAnalysis(BaseModel):
     sentence_aggregate_label: str
     summary: DocumentSummary
 
-
 class TopicInfo(BaseModel):
     label: str
     score: float
     keywords: List[str]
-
 
 class SentenceAnalysis(BaseModel):
     sentence_index: int
@@ -233,7 +371,6 @@ class SentenceAnalysis(BaseModel):
     confidence: float
     color: str
 
-
 class ParagraphAnalysis(BaseModel):
     paragraph_index: int
     text: str
@@ -243,19 +380,16 @@ class ParagraphAnalysis(BaseModel):
     topic: TopicInfo
     sentences: List[SentenceAnalysis]
 
-
 class SharedTopic(BaseModel):
     label: str
     paragraph_indices: List[int]
-
 
 class AnalyzeMeta(BaseModel):
     model_id: str
     max_length: int
     sentence_batch_size: int
     threshold_used: Optional[float] = None
-    topic_model_used: str = "bertopic"
-
+    topic_model_used: str = "bertopic+rules"
 
 class AnalyzeResponse(BaseModel):
     document: DocumentAnalysis
@@ -272,6 +406,8 @@ class AnalyzeResponse(BaseModel):
 PARAGRAPH_SPLIT_RE = re.compile(r"(?:\r?\n){2,}")
 SENTENCE_SPLIT_RE  = re.compile(r'[^.!?]+(?:[.!?]+(?:[")\]]+)?)|[^.!?]+$')
 WS_RE              = re.compile(r"\s+")
+
+_FALLBACK_TOPIC = TopicInfo(label="topik_umum", score=0.0, keywords=["topik_umum"])
 
 
 def _round6(v: float) -> float:
@@ -299,10 +435,8 @@ def _prepare_texts(texts: List[str]) -> List[str]:
 def _predict_proba(texts: List[str], batch_size: int = SENTENCE_BATCH_SIZE) -> List[Dict[str, float]]:
     if not texts:
         return []
-
     prepared = _prepare_texts(texts)
 
-    # Dedup
     unique_texts: List[str] = []
     text_to_idx: Dict[str, int] = {}
     inverse: List[int] = []
@@ -317,56 +451,39 @@ def _predict_proba(texts: List[str], batch_size: int = SENTENCE_BATCH_SIZE) -> L
 
     for chunk in _iter_chunks(unique_texts, batch_size):
         enc = tokenizer(
-            chunk,
-            padding=True,
-            truncation=True,
-            max_length=MAX_LENGTH,
-            return_tensors="pt",
+            chunk, padding=True, truncation=True,
+            max_length=MAX_LENGTH, return_tensors="pt",
         )
         enc = {k: v.to(DEVICE) for k, v in enc.items()}
-
         with torch.inference_mode():
             outputs = model(**enc)
             logits  = outputs.logits
-
             if first_batch or ENABLE_LOGGING:
-                print(f"[DEBUG] logits       : {logits.cpu().tolist()}")
-
+                print(f"[DEBUG] logits: {logits.cpu().tolist()}")
             probs = torch.softmax(logits, dim=-1).cpu().numpy()
-
             if first_batch or ENABLE_LOGGING:
-                print(f"[DEBUG] probabilities: {probs.tolist()}")
-                print(f"[DEBUG] ID2LABEL     : {ID2LABEL}")
+                print(f"[DEBUG] probs: {probs.tolist()}")
                 first_batch = False
-
         for row in probs:
-            prob_dict: Dict[str, float] = {
+            unique_results.append({
                 ID2LABEL.get(idx, str(idx)): float(p)
                 for idx, p in enumerate(row)
-            }
-            unique_results.append(prob_dict)
+            })
 
     return [dict(unique_results[i]) for i in inverse]
 
 
 def _extract_cls_embeddings(texts: List[str], batch_size: int = BERTOPIC_EMBED_BATCH) -> np.ndarray:
-    """
-    Ekstrak CLS embedding dari IndoBERT untuk BERTopic.transform.
-    Konsisten dengan training — model dilatih dengan embedding yang sama.
-    """
+    """CLS embedding dari last hidden state IndoBERT — konsisten dengan training."""
     all_emb = []
     for chunk in _iter_chunks(texts, batch_size):
         enc = tokenizer(
-            chunk,
-            padding=True,
-            truncation=True,
-            max_length=MAX_LENGTH,
-            return_tensors="pt",
+            chunk, padding=True, truncation=True,
+            max_length=MAX_LENGTH, return_tensors="pt",
         )
         enc = {k: v.to(DEVICE) for k, v in enc.items()}
         with torch.inference_mode():
             out = model(**enc, output_hidden_states=True)
-        # last hidden state, posisi [CLS] = indeks 0
         cls = out.hidden_states[-1][:, 0, :].cpu().float().numpy()
         all_emb.append(cls)
     return np.vstack(all_emb)
@@ -403,35 +520,36 @@ def _extract_not_hoax_probability(prob_dict: Dict[str, float], p_hoax: float) ->
     return float(max(0.0, min(1.0, 1.0 - p_hoax)))
 
 
-def analyze_risk(prob_dict: Dict[str, float], original_text: Optional[str] = None) -> Tuple[float, str, str]:
+def analyze_risk(
+    prob_dict: Dict[str, float],
+    original_text: Optional[str] = None,
+) -> Tuple[float, str, str]:
     p_hoax = _extract_hoax_probability(prob_dict)
-    thresh = _THRESHOLD_OPTIMAL or 0.5
+    thresh = _THRESHOLD_OPTIMAL
 
     if p_hoax > THRESH_HIGH:
         level = "high"
         explanation = (
             f"Model sangat yakin teks ini hoaks (P(hoaks) ≈ {p_hoax:.2%}). "
-            "Sebaiknya jangan dipercaya sebelum ada klarifikasi resmi."
+            "Jangan disebarkan sebelum ada klarifikasi resmi."
         )
     elif p_hoax > max(THRESH_MED, thresh):
         level = "medium"
         explanation = (
             f"Model menilai teks ini berpotensi hoaks (P(hoaks) ≈ {p_hoax:.2%}). "
-            "Disarankan cek ulang ke sumber resmi."
+            "Cek ulang ke sumber resmi."
         )
     else:
         level = "low"
         explanation = (
             f"Model menilai teks ini cenderung bukan hoaks (P(hoaks) ≈ {p_hoax:.2%}). "
-            "Tetap gunakan literasi dan bandingkan dengan sumber lain."
+            "Tetap gunakan literasi kritis."
         )
 
     if original_text is not None and len(str(original_text).strip().split()) < 5:
         if level == "low":
             level = "medium"
-        explanation += (
-            " Catatan: teks sangat pendek (< 5 kata), prediksi bisa kurang stabil."
-        )
+        explanation += " Teks sangat pendek (< 5 kata), prediksi bisa kurang stabil."
 
     return p_hoax, level, explanation
 
@@ -465,50 +583,94 @@ def _sentence_color(label: str, confidence: float) -> str:
 
 
 # =========================
-# BERTopic inference — [FIX-MAJOR-3]
-# Selalu inject CLS embeddings dari IndoBERT ke BERTopic.transform.
-# Model BERTopic dilatih dengan embedding_model=None, sehingga transform
-# WAJIB menerima embeddings eksplisit agar tidak error atau salah cluster.
+# [RC-3] Threshold kalimat pendek
+# Kalimat < MIN_KATA_KALIMAT kata menggunakan threshold lebih tinggi
+# untuk mengurangi false positive dari teks tidak representatif.
 # =========================
 
-_FALLBACK_TOPIC = TopicInfo(label="topik_umum", score=0.0, keywords=["topik_umum"])
-
-
-def _bertopic_infer_topics(texts: List[str]) -> List[TopicInfo]:
-    btm = _get_bertopic()
-    if btm is None:
-        print("[INFO] BERTopic belum siap. Mengembalikan topik_umum.")
-        return [_FALLBACK_TOPIC for _ in texts]
-    try:
-        # [FIX-MAJOR-3] Ekstrak CLS embedding dari IndoBERT sebelum transform
-        embeddings = _extract_cls_embeddings(texts, batch_size=BERTOPIC_EMBED_BATCH)
-        topic_ids, _ = btm.transform(texts, embeddings=embeddings)
-
-        results: List[TopicInfo] = []
-        for tid in topic_ids:
-            if tid == -1:
-                results.append(_FALLBACK_TOPIC)
-                continue
-            topic_words = btm.get_topic(tid) or []
-            keywords = [w for w, _ in topic_words[:TOPIC_KEYWORDS_TOPK]]
-            score    = float(topic_words[0][1]) if topic_words else 0.0
-            label    = " / ".join(keywords[:2]) if keywords else f"topik_{tid}"
-            results.append(TopicInfo(label=label, score=_round6(score), keywords=keywords))
-        return results
-    except Exception as e:
-        print(f"[WARN] BERTopic inference error: {e}")
-        return [_FALLBACK_TOPIC for _ in texts]
-
-
-def _to_canonical_label(p_hoax: float) -> str:
-    thresh = _THRESHOLD_OPTIMAL or 0.5
+def _to_canonical_label(p_hoax: float, teks: Optional[str] = None) -> str:
+    thresh = _THRESHOLD_OPTIMAL
+    if teks is not None:
+        n_kata = len(str(teks).strip().split())
+        if n_kata < MIN_KATA_KALIMAT:
+            thresh = THRESH_KALIMAT_PENDEK  # threshold lebih ketat untuk kalimat pendek
     return "hoax" if p_hoax >= thresh else "not_hoax"
+
+
+# =========================
+# [RC-1] + [RC-2] BERTopic inference dengan hard mapping
+#
+# Setiap paragraf SELALU diproses independen (tidak digabung).
+# Rule-based _kategorisasi_teks() selalu override BERTopic jika ada match.
+# =========================
+
+def _infer_topic_per_paragraf(texts: List[str]) -> List[TopicInfo]:
+    """
+    Proses setiap teks secara independen:
+    1. Rule-based keyword match → override jika ada
+    2. BERTopic.transform → fallback jika rule tidak match
+    3. _FALLBACK_TOPIC jika keduanya tidak ada
+
+    [RC-1 FIX] Tidak ada penggabungan paragraf — setiap elemen texts
+               diproses sebagai dokumen terpisah.
+    [RC-2 FIX] rule_match selalu menang → nama kategori, bukan TF-IDF words.
+    """
+    # Tahap 1: rule-based baseline untuk semua teks sekaligus
+    rule_results: List[Optional[Tuple[str, float]]] = [
+        _kategorisasi_teks(t) for t in texts
+    ]
+
+    # Identifikasi indeks yang masih butuh BERTopic (tidak ada rule match)
+    idx_perlu_bertopic = [i for i, r in enumerate(rule_results) if r is None]
+
+    # Tahap 2: BERTopic hanya untuk teks tanpa rule match
+    bertopic_map: Dict[int, TopicInfo] = {}
+    if idx_perlu_bertopic:
+        btm = _get_bertopic()
+        if btm is not None:
+            try:
+                teks_subset = [texts[i] for i in idx_perlu_bertopic]
+                embeddings  = _extract_cls_embeddings(teks_subset, BERTOPIC_EMBED_BATCH)
+                topic_ids, _ = btm.transform(teks_subset, embeddings=embeddings)
+
+                for local_i, (global_i, tid) in enumerate(
+                    zip(idx_perlu_bertopic, topic_ids)
+                ):
+                    if tid == -1:
+                        bertopic_map[global_i] = _FALLBACK_TOPIC
+                        continue
+                    topic_words = btm.get_topic(tid) or []
+                    keywords    = [w for w, _ in topic_words[:TOPIC_KEYWORDS_TOPK]]
+                    score       = float(topic_words[0][1]) if topic_words else 0.0
+                    label       = " / ".join(keywords[:2]) if keywords else f"topik_{tid}"
+                    bertopic_map[global_i] = TopicInfo(
+                        label=label, score=_round6(score), keywords=keywords
+                    )
+            except Exception as e:
+                print(f"[WARN] BERTopic inference error: {e}")
+
+    # Tahap 3: merge — rule menang, BERTopic fallback, lalu _FALLBACK_TOPIC
+    final: List[TopicInfo] = []
+    for i in range(len(texts)):
+        rule_match = rule_results[i]
+        if rule_match is not None:
+            # [RC-2 FIX] Nama kategori dari rule, bukan TF-IDF
+            nama, skor = rule_match
+            final.append(TopicInfo(label=nama, score=skor, keywords=[nama]))
+        elif i in bertopic_map:
+            final.append(bertopic_map[i])
+        else:
+            final.append(_FALLBACK_TOPIC)
+
+    return final
 
 
 def _build_predict_response(prob_dict: Dict[str, float], original_text: str) -> PredictResponse:
     label = max(prob_dict, key=prob_dict.get)
     score = float(prob_dict[label])
-    p_hoax, risk_level, risk_explanation = analyze_risk(prob_dict, original_text=original_text)
+    p_hoax, risk_level, risk_explanation = analyze_risk(
+        prob_dict, original_text=original_text
+    )
     return PredictResponse(
         label=label,
         score=score,
@@ -535,19 +697,16 @@ def _maybe_log(sample_info: Dict):
 def read_root():
     return {
         "message": "Indo Hoax Detector API is running.",
-        "version": "2.0.0",
+        "version": "3.0.0",
         "model_id": MODEL_ID,
         "id2label": ID2LABEL,
         "threshold_optimal": _THRESHOLD_OPTIMAL,
+        "thresh_kalimat_pendek": THRESH_KALIMAT_PENDEK,
+        "min_kata_kalimat": MIN_KATA_KALIMAT,
         "device": str(DEVICE),
         "bertopic_ready": _bertopic_ready,
-        "topic_model": "bertopic",
-        "risk_thresholds": {
-            "high":   f"P(hoaks) > {THRESH_HIGH}",
-            "medium": f"P(hoaks) > {THRESH_MED}",
-            "low":    f"P(hoaks) ≤ {THRESH_MED}",
-        },
-        "endpoints": ["/predict", "/predict-batch", "/analyze"],
+        "topic_model": "bertopic+rule-based",
+        "kategori": [nama for nama, _ in PETA_KATEGORI],
     }
 
 
@@ -560,25 +719,14 @@ def health_check():
 def predict(request: PredictRequest):
     original_text = request.text
     prob_list = _predict_proba([original_text], batch_size=1)
-
     if not prob_list:
         return PredictResponse(
-            label="unknown",
-            score=0.0,
-            probabilities={},
-            hoax_probability=0.0,
-            risk_level="low",
-            risk_explanation="Teks kosong, tidak dapat dievaluasi.",
+            label="unknown", score=0.0, probabilities={},
+            hoax_probability=0.0, risk_level="low",
+            risk_explanation="Teks kosong.",
         )
-
     response = _build_predict_response(prob_list[0], original_text=str(original_text))
-    _maybe_log({
-        "route": "/predict",
-        "text_len": len(str(original_text)),
-        "label": response.label,
-        "p_hoax": response.hoax_probability,
-        "risk_level": response.risk_level,
-    })
+    _maybe_log({"route": "/predict", "label": response.label, "p_hoax": response.hoax_probability})
     return response
 
 
@@ -586,11 +734,10 @@ def predict(request: PredictRequest):
 def predict_batch(request: BatchPredictRequest):
     texts     = request.texts or []
     prob_list = _predict_proba(texts, batch_size=PREDICT_BATCH_SIZE)
-    results: List[PredictResponse] = []
-    for original_text, prob_dict in zip(texts, prob_list):
-        response = _build_predict_response(prob_dict, original_text=str(original_text))
-        _maybe_log({"route": "/predict-batch", "label": response.label, "p_hoax": response.hoax_probability})
-        results.append(response)
+    results   = [
+        _build_predict_response(pd, original_text=str(t))
+        for t, pd in zip(texts, prob_list)
+    ]
     return BatchPredictResponse(results=results)
 
 
@@ -603,7 +750,7 @@ def analyze(request: AnalyzeRequest):
         max_length=MAX_LENGTH,
         sentence_batch_size=SENTENCE_BATCH_SIZE,
         threshold_used=_THRESHOLD_OPTIMAL,
-        topic_model_used="bertopic",  # [FIX-5] selalu bertopic
+        topic_model_used="bertopic+rules",
     )
 
     if not original_text:
@@ -612,8 +759,10 @@ def analyze(request: AnalyzeRequest):
                 label="not_hoax", hoax_probability=0.0, confidence=0.0,
                 risk_level="low", risk_explanation="Teks kosong.",
                 sentence_aggregate_label="not_hoax",
-                summary=DocumentSummary(paragraph_count=0, sentence_count=0,
-                                        hoax_sentence_count=0, not_hoax_sentence_count=0),
+                summary=DocumentSummary(
+                    paragraph_count=0, sentence_count=0,
+                    hoax_sentence_count=0, not_hoax_sentence_count=0,
+                ),
             ),
             paragraphs=[], shared_topics=[], topics_global=None, meta=base_meta,
         )
@@ -624,7 +773,7 @@ def analyze(request: AnalyzeRequest):
 
     p_hoax_doc     = _extract_hoax_probability(doc_prob_dict)
     p_not_hoax_doc = _extract_not_hoax_probability(doc_prob_dict, p_hoax_doc)
-    doc_label      = _to_canonical_label(p_hoax_doc)
+    doc_label      = _to_canonical_label(p_hoax_doc)  # dokumen penuh: pakai threshold normal
     doc_conf       = max(p_hoax_doc, p_not_hoax_doc)
 
     _, risk_level, risk_explanation = analyze_risk(
@@ -643,12 +792,15 @@ def analyze(request: AnalyzeRequest):
 
     sentence_prob_list = _predict_proba(sentence_texts, batch_size=SENTENCE_BATCH_SIZE)
 
-    # Bangun SentenceAnalysis per paragraf
+    # Bangun SentenceAnalysis — [RC-3] threshold adaptif per kalimat
     paragraph_sentences: List[List[SentenceAnalysis]] = [[] for _ in paragraph_texts]
-    for (p_idx, s_idx), sent_text, sent_prob_dict in zip(sentence_map, sentence_texts, sentence_prob_list):
+    for (p_idx, s_idx), sent_text, sent_prob_dict in zip(
+        sentence_map, sentence_texts, sentence_prob_list
+    ):
         p_hoax     = _extract_hoax_probability(sent_prob_dict)
         p_not_hoax = _extract_not_hoax_probability(sent_prob_dict, p_hoax)
-        sent_label = _to_canonical_label(p_hoax)
+        # [RC-3] kalimat pendek gunakan threshold lebih tinggi
+        sent_label = _to_canonical_label(p_hoax, teks=sent_text)
         sent_conf  = max(p_hoax, p_not_hoax)
         paragraph_sentences[p_idx].append(SentenceAnalysis(
             sentence_index=int(s_idx),
@@ -660,18 +812,25 @@ def analyze(request: AnalyzeRequest):
             color=_sentence_color(sent_label, sent_conf),
         ))
 
-    # Ekstrak topik via BERTopic — [FIX-4] tidak ada TF-IDF fallback
-    fallback_topic = _FALLBACK_TOPIC
-    topics_global: Optional[TopicInfo] = None
+    # [RC-1 FIX] Topik: SELALU proses per paragraf (tidak gabung teks)
+    # Apapun nilai request.topic_per_paragraph, setiap paragraf diproses independen.
+    # Jika topic_per_paragraph=False, ambil topik mayoritas sebagai global topic.
+    per_paragraph_topics = _infer_topic_per_paragraf(paragraph_texts)
 
     if request.topic_per_paragraph:
-        topics = _bertopic_infer_topics(paragraph_texts)
+        topics        = per_paragraph_topics
+        topics_global = None
     else:
-        doc_for_topic = "\n\n".join(paragraph_texts)
-        global_list   = _bertopic_infer_topics([doc_for_topic]) if doc_for_topic else [fallback_topic]
-        global_topic  = global_list[0] if global_list else fallback_topic
-        topics_global = global_topic
-        topics        = [global_topic for _ in paragraph_texts]
+        # Global topic = topik mayoritas dari semua paragraf
+        topics        = per_paragraph_topics
+        label_counts: Counter = Counter(t.label for t in per_paragraph_topics)
+        most_common_label = label_counts.most_common(1)[0][0]
+        # Ambil TopicInfo dari paragraf yang topiknya paling umum
+        ref_topic = next(
+            (t for t in per_paragraph_topics if t.label == most_common_label),
+            _FALLBACK_TOPIC,
+        )
+        topics_global = ref_topic
 
     # Bangun ParagraphAnalysis
     paragraphs: List[ParagraphAnalysis] = []
@@ -687,7 +846,7 @@ def analyze(request: AnalyzeRequest):
 
         if sents:
             p_max_hoax = max(s.hoax_probability for s in sents)
-            # [FIX-MAJOR-1] Majority vote: hoaks hanya jika lebih banyak kalimat hoaks
+            # Majority vote per paragraf
             p_label = "hoax" if n_hoax > n_not else "not_hoax"
             p_conf  = max(p_max_hoax, 1.0 - p_max_hoax)
         else:
@@ -695,7 +854,7 @@ def analyze(request: AnalyzeRequest):
             p_label    = "not_hoax"
             p_conf     = 0.0
 
-        topic_info = topics[p_idx] if p_idx < len(topics) else fallback_topic
+        topic_info = per_paragraph_topics[p_idx] if p_idx < len(per_paragraph_topics) else _FALLBACK_TOPIC
         paragraphs.append(ParagraphAnalysis(
             paragraph_index=int(p_idx),
             text=p_text,
@@ -706,7 +865,7 @@ def analyze(request: AnalyzeRequest):
             sentences=sents,
         ))
 
-    # [FIX-MAJOR-2] sentence_aggregate_label: majority vote
+    # Majority vote level dokumen
     sentence_aggregate_label = (
         "hoax" if hoax_sentence_count > not_hoax_sentence_count else "not_hoax"
     )
@@ -720,19 +879,11 @@ def analyze(request: AnalyzeRequest):
         key=lambda x: (x.paragraph_indices[0], x.label),
     )
 
-    summary = DocumentSummary(
-        paragraph_count=len(paragraphs),
-        sentence_count=hoax_sentence_count + not_hoax_sentence_count,
-        hoax_sentence_count=hoax_sentence_count,
-        not_hoax_sentence_count=not_hoax_sentence_count,
-    )
-
     _maybe_log({
         "route": "/analyze",
         "doc_label": doc_label,
         "doc_p_hoax": p_hoax_doc,
         "paragraph_count": len(paragraphs),
-        "topic_model_used": "bertopic",
     })
 
     return AnalyzeResponse(
@@ -743,7 +894,12 @@ def analyze(request: AnalyzeRequest):
             risk_level=risk_level,
             risk_explanation=risk_explanation,
             sentence_aggregate_label=sentence_aggregate_label,
-            summary=summary,
+            summary=DocumentSummary(
+                paragraph_count=len(paragraphs),
+                sentence_count=hoax_sentence_count + not_hoax_sentence_count,
+                hoax_sentence_count=hoax_sentence_count,
+                not_hoax_sentence_count=not_hoax_sentence_count,
+            ),
         ),
         paragraphs=paragraphs,
         shared_topics=shared_topics,
@@ -755,4 +911,4 @@ def analyze(request: AnalyzeRequest):
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", "7860"))
-    uvicorn.run("app:app", host="0.0.0.0", port=port, reload=False)
+    uvicorn.run("app_v3:app", host="0.0.0.0", port=port, reload=False)
