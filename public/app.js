@@ -1,13 +1,10 @@
 /**
- * app.js — v2.0.0
- * Changelog:
- *   [FIX-JS-1] Hapus topicModelSelect (tidak ada di HTML) — tidak ada lagi
- *              referensi ke dropdown topic model.
- *   [FIX-JS-2] resolveActiveTopicModel selalu kembalikan "bertopic".
- *   [FIX-JS-3] callAnalyzeApi hapus parameter topicModel.
- *   [FIX-JS-4] handleDetect hapus topicModel variable.
- *   [FIX-JS-5] Hapus referensi LDA dari topicModelLabel.
- *   [FIX-JS-6] summaryExtraLines langsung hardcode "BERTopic".
+ * app.js — v2.1.0
+ * Perubahan dari v2.0.0:
+ *   [FIX-JS-T1] infoThreshold menampilkan threshold aktual dari meta.threshold_used (0.62)
+ *   [FIX-JS-C1] CONFIDENCE_CUTOFF tetap 0.65 (tidak berubah, sudah benar)
+ *   [FIX-JS-D1] Hapus fungsi _extract_cls_embeddings — tidak ada di frontend
+ *   [CLEAN]     Hapus komentar dan kode tidak terpakai
  */
 
 const DEFAULT_API_BASE_URL = "https://fjrmhri-ta-final-space.hf.space";
@@ -29,7 +26,7 @@ const ID_STOPWORDS = new Set([
   "atas","bawah","secara","langsung","tidak","bukan","ya","iya","nah","si",
   "sang","sehingga","supaya","serta","lagi","pula","telah","sedang","menjadi",
   "terjadi","terhadap","menurut","seperti","bagi","guna","demi","apa","siapa",
-  "mana","kapan","mengapa","bagaimana","dll","dsb","yak","oke","ok",
+  "mana","kapan","mengapa","bagaimana","dll","dsb",
 ]);
 
 function normalizeApiBaseUrl(rawUrl) {
@@ -63,12 +60,12 @@ function resolveApiBaseUrl() {
 const apiBaseUrl = resolveApiBaseUrl();
 let lastPayload = null;
 
-const detectBtn             = document.getElementById("detectBtn");
-const detectLabel           = document.getElementById("detectLabel");
-const detectSpinner         = document.getElementById("detectSpinner");
-const resetBtn              = document.getElementById("resetBtn");
-const newsText              = document.getElementById("newsText");
-const sentenceLevelToggle   = document.getElementById("sentenceLevelToggle");
+const detectBtn               = document.getElementById("detectBtn");
+const detectLabel             = document.getElementById("detectLabel");
+const detectSpinner           = document.getElementById("detectSpinner");
+const resetBtn                = document.getElementById("resetBtn");
+const newsText                = document.getElementById("newsText");
+const sentenceLevelToggle     = document.getElementById("sentenceLevelToggle");
 const topicPerParagraphToggle = document.getElementById("topicToggle");
 
 const analysisInfoBar = document.getElementById("analysisInfoBar");
@@ -79,13 +76,13 @@ const statParagraphs = document.getElementById("statParagraphs");
 const statSentences  = document.getElementById("statSentences");
 const statWords      = document.getElementById("statWords");
 
-const errorBox           = document.getElementById("errorBox");
-const outputSection      = document.getElementById("outputSection");
-const globalSummary      = document.getElementById("globalSummary");
-const outputParagraphs   = document.getElementById("outputParagraphs");
-const confidenceDetails  = document.getElementById("confidenceDetails");
-const confidenceSummary  = document.getElementById("confidenceSummary");
-const confidenceList     = document.getElementById("confidenceList");
+const errorBox          = document.getElementById("errorBox");
+const outputSection     = document.getElementById("outputSection");
+const globalSummary     = document.getElementById("globalSummary");
+const outputParagraphs  = document.getElementById("outputParagraphs");
+const confidenceDetails = document.getElementById("confidenceDetails");
+const confidenceSummary = document.getElementById("confidenceSummary");
+const confidenceList    = document.getElementById("confidenceList");
 
 // =========================
 // Util
@@ -126,11 +123,6 @@ function normalizeTopicScore(score) {
   return null;
 }
 
-// [FIX-JS-2] Topic model selalu BERTopic — tidak ada dropdown pilihan
-function resolveActiveTopicModel() {
-  return "bertopic";
-}
-
 function cleanTopicLabel(rawLabel) {
   const label = String(rawLabel ?? "").trim();
   if (!label || label === "-") return null;
@@ -154,9 +146,7 @@ function firstTopicScore(...candidates) {
 }
 
 function extractTopicFromObject(topicLike) {
-  if (!topicLike || typeof topicLike !== "object") {
-    return { label: null, score: null };
-  }
+  if (!topicLike || typeof topicLike !== "object") return { label: null, score: null };
   const label = firstTopicLabel(
     topicLike.label, topicLike.topic_label, topicLike.topic,
     topicLike.name, topicLike.topicName, topicLike.topicLabel,
@@ -164,70 +154,52 @@ function extractTopicFromObject(topicLike) {
   if (!label) return { label: null, score: null };
   const score = firstTopicScore(
     topicLike.score, topicLike.probability, topicLike.topic_score,
-    topicLike.topic_probability, topicLike.topicScore, topicLike.topicProbability,
-    topicLike.confidence, topicLike.conf, topicLike.prob, topicLike.pct, topicLike.topicProb,
+    topicLike.topic_probability, topicLike.topicScore, topicLike.confidence,
   );
   return { label, score };
 }
 
 function extractTopicFromParagraph(paragraph) {
   const safe = paragraph && typeof paragraph === "object" ? paragraph : {};
-
   if (safe.topic && typeof safe.topic === "object") {
     const rawLabel = typeof safe.topic.label === "string" ? safe.topic.label.trim() : "";
-    if (rawLabel) {
-      return { label: rawLabel, score: normalizeTopicScore(safe.topic.score) };
-    }
-    const topicObject = extractTopicFromObject({
-      label: safe.topic.label, score: safe.topic.score, probability: safe.topic.probability,
-    });
-    if (topicObject.label) return topicObject;
+    if (rawLabel) return { label: rawLabel, score: normalizeTopicScore(safe.topic.score) };
+    const obj = extractTopicFromObject(safe.topic);
+    if (obj.label) return obj;
   } else if (typeof safe.topic === "string") {
     const label = cleanTopicLabel(safe.topic);
     if (label) return { label, score: null };
   }
-
   const flatLabel = firstTopicLabel(safe.topic_label, safe.topicLabel);
   if (flatLabel) {
-    return {
-      label: flatLabel,
-      score: firstTopicScore(safe.topic_score, safe.topic_probability, safe.topicProb),
-    };
+    return { label: flatLabel, score: firstTopicScore(safe.topic_score, safe.topic_probability) };
   }
-
   return { label: null, score: null };
 }
 
 function extractGlobalTopic(payload) {
   const safe = payload && typeof payload === "object" ? payload : {};
-  const topicsGlobal = safe.topics_global;
-
-  if (typeof topicsGlobal === "string") {
-    const label = cleanTopicLabel(topicsGlobal);
+  const tg = safe.topics_global;
+  if (typeof tg === "string") {
+    const label = cleanTopicLabel(tg);
     if (label) return { label, score: null };
   }
-  if (topicsGlobal && typeof topicsGlobal === "object") {
-    const direct = extractTopicFromObject(topicsGlobal);
+  if (tg && typeof tg === "object") {
+    const direct = extractTopicFromObject(tg);
     if (direct.label) return direct;
   }
-
   if (typeof safe.topic === "string") {
     const label = cleanTopicLabel(safe.topic);
     if (label) return { label, score: null };
   }
   if (safe.topic && typeof safe.topic === "object") {
-    const fromTopicObject = extractTopicFromObject(safe.topic);
-    if (fromTopicObject.label) return fromTopicObject;
+    const obj = extractTopicFromObject(safe.topic);
+    if (obj.label) return obj;
   }
-
   const topicLabel = firstTopicLabel(safe.topic_label, safe.topicLabel);
   if (topicLabel) {
-    return {
-      label: topicLabel,
-      score: firstTopicScore(safe.topic_score, safe.topic_probability),
-    };
+    return { label: topicLabel, score: firstTopicScore(safe.topic_score, safe.topic_probability) };
   }
-
   return { label: null, score: null };
 }
 
@@ -264,70 +236,15 @@ function inferTopicLocal(paragraphText) {
 function resolveParagraphTopic(paragraph, globalTopic, paragraphText, isFallback) {
   const backendTopic = extractTopicFromParagraph(paragraph);
   const backendLabel = cleanTopicLabel(backendTopic?.label);
-  if (backendLabel) {
-    return { label: backendLabel, score: normalizeTopicScore(backendTopic?.score) };
-  }
+  if (backendLabel) return { label: backendLabel, score: normalizeTopicScore(backendTopic?.score) };
   if (isFallback) {
     const localTopic = inferTopicLocal(paragraphText);
     const localLabel = cleanTopicLabel(localTopic?.label);
-    if (localLabel) {
-      return { label: localLabel, score: normalizeTopicScore(localTopic?.score) };
-    }
+    if (localLabel) return { label: localLabel, score: normalizeTopicScore(localTopic?.score) };
   }
   const globalLabel = cleanTopicLabel(globalTopic?.label);
-  if (globalLabel) {
-    return { label: globalLabel, score: normalizeTopicScore(globalTopic?.score) };
-  }
+  if (globalLabel) return { label: globalLabel, score: normalizeTopicScore(globalTopic?.score) };
   return { label: null, score: null };
-}
-
-function debugTopicSnippet(payload) {
-  const paragraph0 =
-    payload && Array.isArray(payload.paragraphs) && payload.paragraphs.length > 0
-      ? payload.paragraphs[0] : null;
-  const candidate =
-    payload?.topics_global || payload?.topic_info || paragraph0?.topic || null;
-  try {
-    const raw = JSON.stringify(candidate, null, 2);
-    if (!raw) return "null";
-    return raw.length > 1800 ? `${raw.slice(0, 1800)}\n...` : raw;
-  } catch (_err) {
-    return "[topic snippet tidak bisa di-serialize]";
-  }
-}
-
-function getDebugBox() {
-  if (!outputSection || !globalSummary || !isDebug) return null;
-  let box = document.getElementById("debugBox");
-  if (!box) {
-    box = document.createElement("pre");
-    box.id = "debugBox";
-    box.className = "debug-box";
-    globalSummary.insertAdjacentElement("afterend", box);
-  }
-  return box;
-}
-
-function clearDebugBox() {
-  const existing = document.getElementById("debugBox");
-  if (existing) existing.remove();
-}
-
-function renderTopicDebug(payload, globalTopic, model, options = {}) {
-  if (!isDebug) { clearDebugBox(); return; }
-  const box = getDebugBox();
-  if (!box) return;
-  const topKeys = payload && typeof payload === "object"
-    ? Object.keys(payload).sort().slice(0, 80) : [];
-  const metaTopicModel = payload?.meta?.topic_model_used || "bertopic";
-  box.textContent = [
-    "[DEBUG topic]",
-    `isFallback=${Boolean(options?.isFallback)}`,
-    `topic_model_used (meta): ${metaTopicModel}`,
-    `threshold_used (meta): ${payload?.meta?.threshold_used ?? "null"}`,
-    `payload keys: ${topKeys.join(", ") || "-"}`,
-    "topic snippet:", debugTopicSnippet(payload),
-  ].join("\n");
 }
 
 // =========================
@@ -352,7 +269,7 @@ function splitSentencesHeuristic(text) {
 }
 
 function countParagraphs(text) { return splitParagraphsByBlankLine(text).length; }
-function countSentences(text) { return splitSentencesHeuristic(text).length; }
+function countSentences(text)  { return splitSentencesHeuristic(text).length; }
 function countWords(text) {
   return String(text || "").trim().split(/\s+/).filter(Boolean).length;
 }
@@ -458,9 +375,8 @@ function resetOutput() {
   if (outputParagraphs) outputParagraphs.innerHTML = "";
   if (globalSummary)    globalSummary.textContent  = "";
   if (outputSection)    outputSection.classList.add("hidden");
-  clearDebugBox();
-  if (analysisInfoBar) analysisInfoBar.classList.add("hidden");
-  if (confidenceList)  confidenceList.innerHTML = "";
+  if (analysisInfoBar)  analysisInfoBar.classList.add("hidden");
+  if (confidenceList)   confidenceList.innerHTML = "";
   if (confidenceSummary) confidenceSummary.textContent = "Rincian Keyakinan";
   if (confidenceDetails) {
     confidenceDetails.classList.add("hidden");
@@ -469,7 +385,7 @@ function resetOutput() {
 }
 
 // =========================
-// API call — [FIX-JS-3] hapus topicModel parameter
+// API call
 // =========================
 
 async function fetchWithTimeout(url, options = {}, timeoutMs = API_TIMEOUT_MS) {
@@ -505,7 +421,6 @@ async function callAnalyzeApi(text, topicPerParagraph, sentenceLevel) {
         sentence_level: sentenceLevel !== false,
       }),
     });
-
     if (response.status === 422) {
       response = await fetchWithTimeout(endpoint, {
         method: "POST",
@@ -513,7 +428,6 @@ async function callAnalyzeApi(text, topicPerParagraph, sentenceLevel) {
         body: JSON.stringify({ text }),
       });
     }
-
     return await parsePayload(response);
   } catch (err) {
     if (err instanceof DOMException && err.name === "AbortError") {
@@ -663,7 +577,6 @@ function needsSoftSpace(previousRaw, currentRaw) {
 function joinHighlightedSentences(sentences) {
   const ordered = sortBySentenceIndex(sentences);
   const chunks = [];
-
   ordered.forEach((sentence) => {
     const rawText = String(sentence?.text ?? "");
     if (rawText === "") return;
@@ -676,7 +589,6 @@ function joinHighlightedSentences(sentences) {
       html: `<span class="hl ${hlClass}" title="${escapeHtml(title)}">${escapeHtml(rawText)}</span>`,
     });
   });
-
   if (chunks.length === 0) return "";
   let html = "";
   for (let i = 0; i < chunks.length; i += 1) {
@@ -689,7 +601,7 @@ function joinHighlightedSentences(sentences) {
 }
 
 function buildFallbackParagraphs(paragraphsFromBackend, inputTextUsed) {
-  const inputParagraphs  = splitParagraphsByBlankLine(inputTextUsed);
+  const inputParagraphs   = splitParagraphsByBlankLine(inputTextUsed);
   const backendParagraphs = sortByParagraphIndex(paragraphsFromBackend);
   if (inputParagraphs.length <= 1 || backendParagraphs.length !== 1) return backendParagraphs;
 
@@ -748,7 +660,7 @@ function prepareParagraphModel(paragraphs, globalTopic = { label: null, score: n
   sorted.forEach((paragraph, index) => {
     const paragraphNumber = Number.isFinite(Number(paragraph?.paragraph_index))
       ? Number(paragraph.paragraph_index) + 1 : index + 1;
-    const sentences     = sortBySentenceIndex(paragraph?.sentences);
+    const sentences      = sortBySentenceIndex(paragraph?.sentences);
     const paragraphLabel = computeParagraphLabel(sentences);
 
     sentences.forEach((sentence) => {
@@ -812,20 +724,16 @@ function renderOutputInlineWithPayload(payload, paragraphs, options = {}) {
       ? `${globalTopicLabel} (${formatPercent(globalTopicScore)})` : globalTopicLabel;
   }
 
-  // [FIX-JS-6] Selalu tampilkan "BERTopic" — tidak ada conditional
-  const summaryExtraLines = ["Metode topik aktif: BERTopic"];
-
+  const summaryExtraLines = ["Metode topik aktif: BERTopic + Rule-based"];
   globalSummary.innerHTML = buildGlobalSummaryMarkup(summaryModel, globalTopicText, summaryExtraLines);
 
   if (model.items.length === 0) {
     outputParagraphs.innerHTML = '<p class="paragraph-meta">Tidak ada paragraf yang bisa ditampilkan.</p>';
     outputSection.classList.remove("hidden");
-    renderTopicDebug(payload, globalTopic, model, options);
     return { model, globalTopic, summaryModel };
   }
 
   const fragment = document.createDocumentFragment();
-
   model.items.forEach((item) => {
     const block  = document.createElement("article");
     block.className = "paragraph-block";
@@ -864,7 +772,6 @@ function renderOutputInlineWithPayload(payload, paragraphs, options = {}) {
 
   outputParagraphs.appendChild(fragment);
   outputSection.classList.remove("hidden");
-  renderTopicDebug(payload, globalTopic, model, options);
   return { model, globalTopic, summaryModel };
 }
 
@@ -904,12 +811,12 @@ function renderConfidenceDetails(paragraphs, globalTopic = { label: null, score:
         li.className = "confidence-item";
         li.title = fullText || "(teks kosong)";
 
-        const head   = document.createElement("div");
+        const head = document.createElement("div");
         head.className = "confidence-head";
-        const pos    = document.createElement("span");
+        const pos = document.createElement("span");
         pos.className = "confidence-pos";
         pos.textContent = `P${item.paragraphNumber} S${sentenceNumber}`;
-        const badge  = document.createElement("span");
+        const badge = document.createElement("span");
         badge.className = `confidence-badge ${badgeClass(sentence?.label, confidence)}`;
         badge.textContent = badgeText(sentence?.label, confidence);
         head.appendChild(pos);
@@ -950,9 +857,9 @@ function renderConfidenceDetails(paragraphs, globalTopic = { label: null, score:
       li.className = "confidence-item";
       li.title = fullText || "(teks kosong)";
 
-      const head  = document.createElement("div");
+      const head = document.createElement("div");
       head.className = "confidence-head";
-      const pos   = document.createElement("span");
+      const pos = document.createElement("span");
       pos.className = "confidence-pos";
       pos.textContent = `P${item.paragraphNumber}`;
       const badge = document.createElement("span");
@@ -1016,31 +923,27 @@ async function handleDetect() {
     return;
   }
 
-  const textToSend = normalizeParagraphBreaks(text);
+  const textToSend          = normalizeParagraphBreaks(text);
   const inputParagraphTexts = splitParagraphsByBlankLine(textToSend);
-  const sentenceLevel     = sentenceLevelToggle ? Boolean(sentenceLevelToggle.checked) : true;
-  const topicPerParagraph = Boolean(topicPerParagraphToggle?.checked);
-  // [FIX-JS-4] topicModel dihapus — backend selalu BERTopic
+  const sentenceLevel       = sentenceLevelToggle ? Boolean(sentenceLevelToggle.checked) : true;
+  const topicPerParagraph   = Boolean(topicPerParagraphToggle?.checked);
 
   setLoading(true);
   try {
-    // [FIX-JS-3] Tidak kirim topicModel
     const payload = await callAnalyzeApi(textToSend, topicPerParagraph, sentenceLevel);
     lastPayload = payload;
 
-    // Info bar: threshold + topic model
+    // [FIX-JS-T1] Tampilkan threshold aktual dari meta (seharusnya 0.62)
     if (analysisInfoBar && infoThreshold && infoTopicModel) {
       const meta = payload?.meta || {};
       const th = meta.threshold_used;
-
       if (th !== undefined && th !== null) {
         infoThreshold.textContent = `Threshold: ${Number(th).toFixed(2)} (kalibrasi val-set)`;
         infoThreshold.classList.remove("hidden");
       } else {
         infoThreshold.classList.add("hidden");
       }
-      // [FIX-JS-6] Selalu tampilkan BERTopic
-      infoTopicModel.textContent = "Metode topik: BERTopic";
+      infoTopicModel.textContent = "Metode topik: BERTopic + Rule-based";
       infoTopicModel.classList.remove("hidden");
       analysisInfoBar.classList.remove("hidden");
     }

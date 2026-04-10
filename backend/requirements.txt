@@ -9,3 +9,5 @@ scikit-learn
 huggingface_hub
 bertopic
 sentence-transformers
+umap-learn
+hdbscan

@@ -17,8 +17,7 @@
       <section class="card input-section">
         <h1>Deteksi Hoaks Berita</h1>
         <p class="subtitle">
-          Masukkan teks berita multi paragraf untuk melihat highlight kalimat
-          hoaks/fakta.
+          Masukkan teks berita multi paragraf untuk melihat highlight kalimat hoaks/fakta.
         </p>
 
         <textarea
@@ -36,15 +35,9 @@
         <div class="action-row">
           <button id="detectBtn" type="button" class="btn btn-primary">
             <span id="detectLabel">Deteksi</span>
-            <span
-              id="detectSpinner"
-              class="spinner hidden"
-              aria-hidden="true"
-            ></span>
+            <span id="detectSpinner" class="spinner hidden" aria-hidden="true"></span>
           </button>
-          <button id="resetBtn" type="button" class="btn btn-secondary">
-            Reset
-          </button>
+          <button id="resetBtn" type="button" class="btn btn-secondary">Reset</button>
         </div>
 
         <div class="topic-toggle-row">
@@ -53,9 +46,7 @@
             <span class="topic-toggle-switch" aria-hidden="true"></span>
             <span class="topic-toggle-label">Deteksi per kalimat</span>
           </label>
-          <p class="topic-toggle-hint">
-            ON: deteksi per kalimat. OFF: deteksi per paragraf.
-          </p>
+          <p class="topic-toggle-hint">ON: deteksi per kalimat. OFF: deteksi per paragraf.</p>
         </div>
 
         <div class="topic-toggle-row">
@@ -64,37 +55,23 @@
             <span class="topic-toggle-switch" aria-hidden="true"></span>
             <span class="topic-toggle-label">Cek topik per paragraf</span>
           </label>
-          <p class="topic-toggle-hint">
-            OFF: Topik global dokumen • ON: Topik per paragraf
-          </p>
+          <p class="topic-toggle-hint">OFF: Topik global dokumen • ON: Topik per paragraf</p>
         </div>
 
         <p class="legend-note">
           <span class="legend legend--green">Hijau</span> = Fakta,
           <span class="legend legend--red">Merah</span> = Hoaks,
-          <span class="legend legend--orange">Oranye</span> = Ragu (confidence
-          &lt; 65%)
+          <span class="legend legend--orange">Oranye</span> = Ragu (confidence &lt; 65%)
         </p>
       </section>
 
-      <section
-        id="errorBox"
-        class="card error-box hidden"
-        role="alert"
-      ></section>
+      <section id="errorBox" class="card error-box hidden" role="alert"></section>
 
       <section id="outputSection" class="card output-section hidden">
         <h2>Hasil Highlight Inline</h2>
-        <!-- Info bar: threshold + metode dari backend meta -->
         <div id="analysisInfoBar" class="analysis-info-bar hidden">
-          <span
-            id="infoThreshold"
-            class="analysis-info-pill analysis-info-pill--thresh"
-          ></span>
-          <span
-            id="infoTopicModel"
-            class="analysis-info-pill analysis-info-pill--topic"
-          ></span>
+          <span id="infoThreshold" class="analysis-info-pill analysis-info-pill--thresh"></span>
+          <span id="infoTopicModel" class="analysis-info-pill analysis-info-pill--topic"></span>
         </div>
         <p id="globalSummary" class="global-summary"></p>
         <div id="outputParagraphs" class="paragraph-list"></div>
