@@ -3,18 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Deteksi Hoaks — V2</title>
+    <title>Deteksi Hoaks Berita</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Crimson+Pro:ital,wght@0,400;0,600;0,700;1,400&family=DM+Sans:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap"
-      rel="stylesheet"
-    />
+    <link href="https://fonts.googleapis.com/css2?family=Crimson+Pro:ital,wght@0,400;0,600;0,700;1,400&family=DM+Sans:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
 
-    <!-- Background ambient blobs -->
     <div class="ambient" aria-hidden="true">
       <div class="blob blob--1"></div>
       <div class="blob blob--2"></div>
@@ -23,47 +19,28 @@
 
     <main class="app-container">
 
-      <!-- ── HEADER ────────────────────────────────────────────── -->
+      <!-- HEADER -->
       <header class="site-header">
         <div class="site-header__eyebrow">
           <span class="eyebrow-dot"></span>
-          <span>Sistem Analisis Berita</span>
+          <span>Sistem Deteksi Hoaks · IndoBERT + BERTopic</span>
         </div>
-        <h1 class="site-header__title">
-          Deteksi <em>Hoaks</em>
-          <span class="v2-pill">V2</span>
-        </h1>
-        <p class="site-header__sub">
-          Powered by IndoBERT · Tiga metode topic modelling
-        </p>
+        <h1 class="site-header__title">Deteksi <em>Hoaks</em> Berita</h1>
+        <p class="site-header__sub">Analisis otomatis per kalimat menggunakan model bahasa Indonesia.</p>
       </header>
 
-      <!-- ── INPUT CARD ────────────────────────────────────────── -->
+      <!-- INPUT CARD -->
       <section class="card input-card">
-        <div class="card__label">01 — Masukkan Teks</div>
-
+        <div class="card__label">Masukkan Teks Berita</div>
         <div class="textarea-wrap">
-          <textarea
-            id="newsText"
-            rows="10"
-            placeholder="Tempel teks berita di sini…&#10;&#10;Sistem akan menganalisis setiap kalimat dan paragraf."
-          ></textarea>
+          <textarea id="newsText" rows="10" placeholder="Tempel teks berita di sini…&#10;&#10;Gunakan baris kosong untuk memisahkan paragraf."></textarea>
           <div class="textarea-corner" aria-hidden="true"></div>
         </div>
 
         <div id="inputStats" class="input-stats">
-          <span class="stat-pill" id="statParagraphs">
-            <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><rect x="1" y="1" width="10" height="2.5" rx="1" fill="currentColor" opacity=".5"/><rect x="1" y="5" width="7" height="2.5" rx="1" fill="currentColor" opacity=".5"/><rect x="1" y="9" width="9" height="2.5" rx="1" fill="currentColor" opacity=".5"/></svg>
-            <span>0 paragraf</span>
-          </span>
-          <span class="stat-pill" id="statSentences">
-            <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M2 3h8M2 6h5M2 9h6.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity=".5"/></svg>
-            <span>0 kalimat</span>
-          </span>
-          <span class="stat-pill" id="statWords">
-            <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><circle cx="6" cy="6" r="4.5" stroke="currentColor" stroke-width="1.5" opacity=".5"/><path d="M6 3.5v5M3.5 6h5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" opacity=".5"/></svg>
-            <span>0 kata</span>
-          </span>
+          <span class="stat-pill" id="statParagraphs">Paragraf: 0</span>
+          <span class="stat-pill" id="statSentences">Kalimat: 0</span>
+          <span class="stat-pill" id="statWords">Kata: 0</span>
         </div>
 
         <div class="action-row">
@@ -81,247 +58,224 @@
             Reset
           </button>
         </div>
-      </section>
 
-      <!-- ── SETTINGS CARD ─────────────────────────────────────── -->
-      <section class="card settings-card">
-        <div class="card__label">02 — Konfigurasi Analisis</div>
-
-        <div class="toggles-row">
-          <!-- Toggle 1 -->
+        <div class="toggle-row">
           <label class="toggle-item" for="sentenceLevelToggle">
-            <div class="toggle-item__icon">
-              <svg width="18" height="18" viewBox="0 0 20 20" fill="none"><path d="M3 5h14M3 10h9M3 15h11" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-            </div>
             <div class="toggle-item__body">
-              <span class="toggle-item__name">Deteksi per kalimat</span>
-              <span class="toggle-item__hint">ON = analisis kalimat • OFF = analisis paragraf</span>
+              <span class="toggle-item__name">Highlight per kalimat</span>
+              <span class="toggle-item__hint">ON = tiap kalimat diwarnai · OFF = tiap paragraf diwarnai</span>
             </div>
             <div class="toggle-switch-wrap">
               <input type="checkbox" id="sentenceLevelToggle" checked />
               <span class="toggle-track" aria-hidden="true"><span class="toggle-thumb"></span></span>
             </div>
           </label>
+        </div>
 
-          <div class="toggle-divider"></div>
+        <!-- topicToggle disembunyikan dari UI, logic JS tetap aktif -->
+        <input type="checkbox" id="topicToggle" class="sr-only" aria-hidden="true" tabindex="-1" />
 
-          <!-- Toggle 2 -->
-          <label class="toggle-item" for="topicToggle">
-            <div class="toggle-item__icon">
-              <svg width="18" height="18" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="1.6"/><circle cx="10" cy="10" r="3" stroke="currentColor" stroke-width="1.6"/></svg>
-            </div>
-            <div class="toggle-item__body">
-              <span class="toggle-item__name">Topik per paragraf</span>
-              <span class="toggle-item__hint">OFF = topik global • ON = topik tiap paragraf</span>
-            </div>
-            <div class="toggle-switch-wrap">
-              <input type="checkbox" id="topicToggle" />
-              <span class="toggle-track" aria-hidden="true"><span class="toggle-thumb"></span></span>
-            </div>
-          </label>
+        <div class="legend-row">
+          <span class="legend-item legend-item--green"><span class="legend-dot"></span>Fakta</span>
+          <span class="legend-item legend-item--red"><span class="legend-dot"></span>Hoaks</span>
+          <span class="legend-item legend-item--orange"><span class="legend-dot"></span>Ragu &lt;65%</span>
         </div>
       </section>
 
-      <!-- ── TOPIC MODEL CARD ──────────────────────────────────── -->
-      <section class="card topic-card">
-        <div class="card__label">03 — Metode Topic Modelling</div>
-
-        <!-- HIDDEN native select — dipakai JS untuk membaca nilai -->
-        <select id="topicModelSelect" class="sr-only" aria-hidden="true" tabindex="-1">
-          <option value="tfidf"    selected>TF-IDF</option>
-          <option value="lda"             >LDA</option>
-          <option value="bertopic"        >BERTopic</option>
-        </select>
-
-        <!-- Visual card picker -->
-        <div class="method-grid" role="radiogroup" aria-label="Pilih metode topic modelling">
-
-          <!-- Card: TF-IDF -->
-          <button
-            type="button"
-            class="method-card method-card--active"
-            data-value="tfidf"
-            role="radio"
-            aria-checked="true"
-            aria-label="TF-IDF"
-          >
-            <div class="method-card__glow"></div>
-            <div class="method-card__header">
-              <div class="method-card__icon method-card__icon--tfidf">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-                  <path d="M3 6h18M3 12h12M3 18h15" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                  <path d="M17 15l3 3-3 3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-              </div>
-              <div class="method-card__badges">
-                <span class="badge badge--speed">⚡ Instan</span>
-                <span class="badge badge--type">Statistik</span>
-              </div>
-            </div>
-            <div class="method-card__name">TF-IDF</div>
-            <div class="method-card__full">Term Frequency–Inverse Document Frequency</div>
-            <div class="method-card__desc">
-              Keyword berbasis frekuensi. Tidak perlu model tambahan, berjalan langsung in-process.
-            </div>
-            <div class="method-card__check" aria-hidden="true">
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6" fill="currentColor"/><path d="M4.5 7l2 2 3-3.5" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            </div>
-          </button>
-
-          <!-- Card: LDA -->
-          <button
-            type="button"
-            class="method-card"
-            data-value="lda"
-            role="radio"
-            aria-checked="false"
-            aria-label="LDA – Latent Dirichlet Allocation"
-          >
-            <div class="method-card__glow"></div>
-            <div class="method-card__header">
-              <div class="method-card__icon method-card__icon--lda">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-                  <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/>
-                  <path d="M12 3c0 0 4 4 4 9s-4 9-4 9" stroke="currentColor" stroke-width="1.6"/>
-                  <path d="M12 3c0 0-4 4-4 9s4 9 4 9" stroke="currentColor" stroke-width="1.6"/>
-                  <path d="M3 12h18" stroke="currentColor" stroke-width="1.6"/>
-                </svg>
-              </div>
-              <div class="method-card__badges">
-                <span class="badge badge--speed">⚡ Cepat</span>
-                <span class="badge badge--type">Probabilistik</span>
-              </div>
-            </div>
-            <div class="method-card__name">LDA</div>
-            <div class="method-card__full">Latent Dirichlet Allocation</div>
-            <div class="method-card__desc">
-              Distribusi topik probabilistik. Menggunakan artefak pre-trained dari Hugging Face.
-            </div>
-            <div class="method-card__check" aria-hidden="true">
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6" fill="currentColor"/><path d="M4.5 7l2 2 3-3.5" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            </div>
-          </button>
-
-          <!-- Card: BERTopic -->
-          <button
-            type="button"
-            class="method-card"
-            data-value="bertopic"
-            role="radio"
-            aria-checked="false"
-            aria-label="BERTopic"
-          >
-            <div class="method-card__glow"></div>
-            <div class="method-card__header">
-              <div class="method-card__icon method-card__icon--bertopic">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-                  <path d="M12 3l2.5 5 5.5.8-4 3.9.9 5.5L12 15.6l-4.9 2.6.9-5.5L4 8.8l5.5-.8L12 3z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
-                </svg>
-              </div>
-              <div class="method-card__badges">
-                <span class="badge badge--speed">🐢 Lambat</span>
-                <span class="badge badge--type badge--semantic">Semantik</span>
-              </div>
-            </div>
-            <div class="method-card__name">BERTopic</div>
-            <div class="method-card__full">Contextual Embedding Topics</div>
-            <div class="method-card__desc">
-              Embedding multilingual + UMAP + HDBSCAN. Paling kaya makna, butuh GPU.
-            </div>
-            <div class="method-card__check" aria-hidden="true">
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6" fill="currentColor"/><path d="M4.5 7l2 2 3-3.5" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            </div>
-          </button>
-
-        </div>
-
-        <!-- Hint bar -->
-        <div class="method-hint-bar" id="topicMethodHint" aria-live="polite">
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.4"/><path d="M8 7v5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="5" r=".8" fill="currentColor"/></svg>
-          <span id="topicMethodHintText">TF-IDF berjalan tanpa artefak model — cocok untuk deployment minimal.</span>
-        </div>
-      </section>
-
-      <!-- ── LEGEND ────────────────────────────────────────────── -->
-      <div class="legend-row" aria-label="Keterangan warna">
-        <span class="legend-item legend-item--green">
-          <span class="legend-dot"></span> Fakta
-        </span>
-        <span class="legend-item legend-item--red">
-          <span class="legend-dot"></span> Hoaks
-        </span>
-        <span class="legend-item legend-item--orange">
-          <span class="legend-dot"></span> Ragu &lt;65%
-        </span>
-      </div>
-
-      <!-- ── ERROR ─────────────────────────────────────────────── -->
+      <!-- ERROR -->
       <div id="errorBox" class="error-box hidden" role="alert">
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.4"/><path d="M8 5v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="11.5" r=".8" fill="currentColor"/></svg>
-        <span></span>
+        <span id="errorText"></span>
       </div>
 
-      <!-- ── OUTPUT ─────────────────────────────────────────────── -->
+      <!-- OUTPUT -->
       <section id="outputSection" class="card output-card hidden">
-        <div class="card__label">Hasil Analisis</div>
+
+        <!-- Verdict -->
+        <div id="verdictBanner" class="verdict-banner hidden">
+          <div class="verdict-banner__left">
+            <div id="verdictIcon" class="verdict-icon" aria-hidden="true"></div>
+            <div class="verdict-banner__text">
+              <div id="verdictLabel" class="verdict-label"></div>
+              <div id="verdictConf" class="verdict-conf"></div>
+            </div>
+          </div>
+          <div id="verdictTopic" class="verdict-topic hidden"></div>
+        </div>
+
+        <div class="section-divider"></div>
+
+        <div class="card__label" style="margin-bottom:12px;">Highlight Kalimat</div>
         <div id="globalSummary" class="global-summary"></div>
         <div id="outputParagraphs" class="paragraph-list"></div>
       </section>
 
-      <!-- ── CONFIDENCE DETAILS ────────────────────────────────── -->
+      <!-- CONFIDENCE DETAILS -->
       <details id="confidenceDetails" class="card confidence-card hidden">
         <summary id="confidenceSummary" class="confidence-summary">
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-          Rincian Keyakinan
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="2" y="2" width="12" height="12" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M5 8h6M8 5v6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+          Rincian Keyakinan per Kalimat
         </summary>
         <ul id="confidenceList" class="confidence-list"></ul>
       </details>
+
+      <!-- MODEL INFO -->
+      <section class="card model-card">
+        <div class="card__label">Informasi Model &amp; Evaluasi</div>
+
+        <div class="model-arch">
+          <div class="arch-row">
+            <div class="arch-item">
+              <div class="arch-key">Model Klasifikasi</div>
+              <div class="arch-val"><code>indolem/indobert-base-uncased</code></div>
+            </div>
+            <div class="arch-item">
+              <div class="arch-key">Model Topik</div>
+              <div class="arch-val">BERTopic + paraphrase-multilingual-MiniLM-L12-v2</div>
+            </div>
+            <div class="arch-item">
+              <div class="arch-key">Dataset</div>
+              <div class="arch-val">172.174 dokumen · 5 sumber · 6,9% hoaks</div>
+            </div>
+            <div class="arch-item">
+              <div class="arch-key">Threshold Optimal</div>
+              <div class="arch-val">0.62 (dikalibrasi pada validation set)</div>
+            </div>
+            <div class="arch-item">
+              <div class="arch-key">Split Data</div>
+              <div class="arch-val">Train 70% · Val 15% · Test 15%</div>
+            </div>
+            <div class="arch-item">
+              <div class="arch-key">Tanggal Training</div>
+              <div class="arch-val">10 April 2026 · Transformers 5.0.0</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="metrics-strip">
+          <div class="metric-chip">
+            <div class="metric-chip__val">99.83%</div>
+            <div class="metric-chip__key">Akurasi<br/>Test</div>
+          </div>
+          <div class="metric-chip">
+            <div class="metric-chip__val">98.74%</div>
+            <div class="metric-chip__key">F1-Hoaks<br/>Test</div>
+          </div>
+          <div class="metric-chip">
+            <div class="metric-chip__val">99.92%</div>
+            <div class="metric-chip__key">AUC-ROC<br/>Test</div>
+          </div>
+          <div class="metric-chip">
+            <div class="metric-chip__val">99.32%</div>
+            <div class="metric-chip__key">Presisi<br/>Hoaks Test</div>
+          </div>
+          <div class="metric-chip">
+            <div class="metric-chip__val">98.16%</div>
+            <div class="metric-chip__key">Recall<br/>Hoaks Test</div>
+          </div>
+          <div class="metric-chip">
+            <div class="metric-chip__val">610</div>
+            <div class="metric-chip__key">Topik<br/>BERTopic</div>
+          </div>
+        </div>
+
+        <div class="eval-tabs" role="tablist">
+          <button class="eval-tab eval-tab--active" role="tab" aria-selected="true" data-tab="cm">Confusion Matrix</button>
+          <button class="eval-tab" role="tab" aria-selected="false" data-tab="roc">ROC Curve</button>
+          <button class="eval-tab" role="tab" aria-selected="false" data-tab="topic">Topik BERTopic</button>
+          <button class="eval-tab" role="tab" aria-selected="false" data-tab="ctfidf">c-TF-IDF</button>
+          <button class="eval-tab" role="tab" aria-selected="false" data-tab="dataset">Dataset</button>
+        </div>
+
+        <div class="eval-panels">
+
+          <div class="eval-panel eval-panel--active" data-panel="cm">
+            <p class="eval-caption">Confusion matrix menunjukkan jumlah prediksi benar dan salah — membantu mengidentifikasi seberapa besar model menghasilkan false positive (fakta dikira hoaks) dan false negative (hoaks lolos deteksi).</p>
+            <div class="eval-img-row">
+              <figure class="eval-figure">
+                <img src="/hasil/confusion_matrix_validation.png" alt="Confusion Matrix Validation" loading="lazy" />
+                <figcaption>Validation Set</figcaption>
+              </figure>
+              <figure class="eval-figure">
+                <img src="/hasil/confusion_matrix_test.png" alt="Confusion Matrix Test" loading="lazy" />
+                <figcaption>Test Set</figcaption>
+              </figure>
+            </div>
+          </div>
+
+          <div class="eval-panel" data-panel="roc">
+            <p class="eval-caption">ROC curve memperlihatkan kemampuan model membedakan kelas di berbagai threshold — AUC mendekati 1.0 menandakan diskriminasi yang sangat baik antara berita hoaks dan fakta.</p>
+            <div class="eval-img-row">
+              <figure class="eval-figure">
+                <img src="/hasil/roc_curve_validation.png" alt="ROC Validation" loading="lazy" />
+                <figcaption>Validation · AUC = 0.9994</figcaption>
+              </figure>
+              <figure class="eval-figure">
+                <img src="/hasil/roc_curve_test.png" alt="ROC Test" loading="lazy" />
+                <figcaption>Test · AUC = 0.9992</figcaption>
+              </figure>
+            </div>
+          </div>
+
+          <div class="eval-panel" data-panel="topic">
+            <p class="eval-caption">Distribusi 610 topik BERTopic pada korpus training menggambarkan keberagaman tema berita — diperlukan untuk memahami cakupan domain yang bisa dianalisis oleh model topik.</p>
+            <figure class="eval-figure eval-figure--full">
+              <img src="/hasil/distribusi_topik_bertopic.png" alt="Distribusi Topik" loading="lazy" />
+              <figcaption>Top-15 Topik BERTopic (corpus pra-oversampling, 120.521 dokumen)</figcaption>
+            </figure>
+            <figure class="eval-figure eval-figure--full" style="margin-top:14px;">
+              <img src="/hasil/topik_per_label.png" alt="Topik per Label" loading="lazy" />
+              <figcaption>Distribusi Topik Dominan per Label — Hoaks vs Non-Hoaks</figcaption>
+            </figure>
+          </div>
+
+          <div class="eval-panel" data-panel="ctfidf">
+            <p class="eval-caption">Skor c-TF-IDF menunjukkan kata-kata paling khas per topik — kata dengan skor tinggi adalah pembeda utama yang digunakan BERTopic untuk mengklasifikasikan topik suatu dokumen.</p>
+            <figure class="eval-figure eval-figure--full">
+              <img src="/hasil/ctfidf_heatmap.png" alt="c-TF-IDF Heatmap" loading="lazy" />
+              <figcaption>Heatmap Skor c-TF-IDF — Top-5 Kata per Topik (maks 15 topik)</figcaption>
+            </figure>
+            <figure class="eval-figure eval-figure--full" style="margin-top:14px;">
+              <img src="/hasil/ctfidf_distribusi_topik.png" alt="Distribusi c-TF-IDF" loading="lazy" />
+              <figcaption>Jumlah Dokumen per Topik berdasarkan c-TF-IDF</figcaption>
+            </figure>
+          </div>
+
+          <div class="eval-panel" data-panel="dataset">
+            <p class="eval-caption">Distribusi dataset memperlihatkan komposisi label dan sumber data — penting untuk memahami potensi bias dan alasan dilakukannya oversampling kelas minoritas (hoaks) saat training.</p>
+            <figure class="eval-figure eval-figure--full">
+              <img src="/hasil/distribusi_dataset.png" alt="Distribusi Dataset" loading="lazy" />
+              <figcaption>Distribusi Label, Sumber, dan Panjang Teks Dataset</figcaption>
+            </figure>
+            <figure class="eval-figure eval-figure--full" style="margin-top:14px;">
+              <img src="/hasil/kalibrasi_threshold_validation.png" alt="Kalibrasi Threshold" loading="lazy" />
+              <figcaption>Kalibrasi Threshold pada Validation Set — Threshold Optimal: 0.62</figcaption>
+            </figure>
+          </div>
+
+        </div>
+      </section>
 
     </main>
 
     <script src="app.js" type="module"></script>
 
-    <!-- Topic card picker logic (inline, tidak bergantung app.js) -->
     <script>
       (function () {
-        const select = document.getElementById('topicModelSelect');
-        const cards  = document.querySelectorAll('.method-card');
-        const hintEl = document.getElementById('topicMethodHintText');
-
-        const HINTS = {
-          tfidf:    'TF-IDF berjalan tanpa artefak model — cocok untuk deployment minimal.',
-          lda:      'LDA memuat artefak pre-trained dari Hugging Face secara lazy (pertama kali digunakan).',
-          bertopic: 'BERTopic menggunakan embedding semantik — perlu GPU dan model BERTopic dari Hugging Face.',
-        };
-
-        function activate(value) {
-          cards.forEach(function (card) {
-            const isActive = card.dataset.value === value;
-            card.classList.toggle('method-card--active', isActive);
-            card.setAttribute('aria-checked', String(isActive));
-          });
-          if (select) select.value = value;
-          if (hintEl)  hintEl.textContent = HINTS[value] || '';
-        }
-
-        cards.forEach(function (card) {
-          card.addEventListener('click', function () {
-            activate(card.dataset.value);
-          });
-          card.addEventListener('keydown', function (e) {
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault();
-              activate(card.dataset.value);
-            }
+        var tabs   = document.querySelectorAll('.eval-tab');
+        var panels = document.querySelectorAll('.eval-panel');
+        tabs.forEach(function (tab) {
+          tab.addEventListener('click', function () {
+            var target = tab.dataset.tab;
+            tabs.forEach(function (t) {
+              t.classList.toggle('eval-tab--active', t.dataset.tab === target);
+              t.setAttribute('aria-selected', String(t.dataset.tab === target));
+            });
+            panels.forEach(function (p) {
+              p.classList.toggle('eval-panel--active', p.dataset.panel === target);
+            });
           });
         });
-
-        // Reflect changes if JS in app.js ever changes the select
-        if (select) {
-          select.addEventListener('change', function () {
-            activate(select.value);
-          });
-        }
       })();
     </script>
 
