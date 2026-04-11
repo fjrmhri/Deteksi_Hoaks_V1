@@ -6,83 +6,278 @@
     <title>Deteksi Hoaks Berita</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Merriweather:wght@400;700&family=Space+Grotesk:wght@400;500;700&display=swap"
-      rel="stylesheet"
-    />
+    <link href="https://fonts.googleapis.com/css2?family=Crimson+Pro:ital,wght@0,400;0,600;0,700;1,400&family=DM+Sans:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <main class="app-container">
-      <section class="card input-section">
-        <h1>Deteksi Hoaks Berita</h1>
-        <p class="subtitle">
-          Masukkan teks berita multi paragraf untuk melihat highlight kalimat hoaks/fakta.
-        </p>
 
-        <textarea
-          id="newsText"
-          rows="12"
-          placeholder="Tempel teks berita di sini..."
-        ></textarea>
+    <div class="ambient" aria-hidden="true">
+      <div class="blob blob--1"></div>
+      <div class="blob blob--2"></div>
+      <div class="blob blob--3"></div>
+    </div>
+
+    <main class="app-container">
+
+      <!-- HEADER -->
+      <header class="site-header">
+        <div class="site-header__eyebrow">
+          <span class="eyebrow-dot"></span>
+          <span>Sistem Deteksi Hoaks · IndoBERT + BERTopic</span>
+        </div>
+        <h1 class="site-header__title">Deteksi <em>Hoaks</em> Berita</h1>
+        <p class="site-header__sub">Analisis otomatis per kalimat menggunakan model bahasa Indonesia.</p>
+      </header>
+
+      <!-- INPUT CARD -->
+      <section class="card input-card">
+        <div class="card__label">Masukkan Teks Berita</div>
+        <div class="textarea-wrap">
+          <textarea id="newsText" rows="10" placeholder="Tempel teks berita di sini…&#10;&#10;Gunakan baris kosong untuk memisahkan paragraf."></textarea>
+          <div class="textarea-corner" aria-hidden="true"></div>
+        </div>
 
         <div id="inputStats" class="input-stats">
-          <span id="statParagraphs">Paragraf: 0</span>
-          <span id="statSentences">Kalimat: 0</span>
-          <span id="statWords">Kata: 0</span>
+          <span class="stat-pill" id="statParagraphs">Paragraf: 0</span>
+          <span class="stat-pill" id="statSentences">Kalimat: 0</span>
+          <span class="stat-pill" id="statWords">Kata: 0</span>
         </div>
 
         <div class="action-row">
-          <button id="detectBtn" type="button" class="btn btn-primary">
-            <span id="detectLabel">Deteksi</span>
-            <span id="detectSpinner" class="spinner hidden" aria-hidden="true"></span>
+          <button id="detectBtn" type="button" class="btn-detect">
+            <span id="detectLabel">Analisis Sekarang</span>
+            <span id="detectSpinner" class="spinner hidden" aria-hidden="true">
+              <svg class="spin-svg" viewBox="0 0 24 24" fill="none">
+                <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2.5" stroke-dasharray="42 14" stroke-linecap="round"/>
+              </svg>
+            </span>
+            <svg class="btn-arrow" width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </button>
-          <button id="resetBtn" type="button" class="btn btn-secondary">Reset</button>
+          <button id="resetBtn" type="button" class="btn-reset">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3 8a5 5 0 1 1 1.5 3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M3 12V8h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Reset
+          </button>
         </div>
 
-        <div class="topic-toggle-row">
-          <label class="topic-toggle" for="sentenceLevelToggle">
-            <input type="checkbox" id="sentenceLevelToggle" checked />
-            <span class="topic-toggle-switch" aria-hidden="true"></span>
-            <span class="topic-toggle-label">Deteksi per kalimat</span>
+        <div class="toggle-row">
+          <label class="toggle-item" for="sentenceLevelToggle">
+            <div class="toggle-item__body">
+              <span class="toggle-item__name">Highlight per kalimat</span>
+              <span class="toggle-item__hint">ON = tiap kalimat diwarnai · OFF = tiap paragraf diwarnai</span>
+            </div>
+            <div class="toggle-switch-wrap">
+              <input type="checkbox" id="sentenceLevelToggle" checked />
+              <span class="toggle-track" aria-hidden="true"><span class="toggle-thumb"></span></span>
+            </div>
           </label>
-          <p class="topic-toggle-hint">ON: deteksi per kalimat. OFF: deteksi per paragraf.</p>
         </div>
 
-        <div class="topic-toggle-row">
-          <label class="topic-toggle" for="topicToggle">
-            <input type="checkbox" id="topicToggle" />
-            <span class="topic-toggle-switch" aria-hidden="true"></span>
-            <span class="topic-toggle-label">Cek topik per paragraf</span>
-          </label>
-          <p class="topic-toggle-hint">OFF: Topik global dokumen • ON: Topik per paragraf</p>
-        </div>
+        <!-- topicToggle disembunyikan dari UI, logic JS tetap aktif -->
+        <input type="checkbox" id="topicToggle" class="sr-only" aria-hidden="true" tabindex="-1" />
 
-        <p class="legend-note">
-          <span class="legend legend--green">Hijau</span> = Fakta,
-          <span class="legend legend--red">Merah</span> = Hoaks,
-          <span class="legend legend--orange">Oranye</span> = Ragu (confidence &lt; 65%)
-        </p>
+        <div class="legend-row">
+          <span class="legend-item legend-item--green"><span class="legend-dot"></span>Fakta</span>
+          <span class="legend-item legend-item--red"><span class="legend-dot"></span>Hoaks</span>
+          <span class="legend-item legend-item--orange"><span class="legend-dot"></span>Ragu &lt;65%</span>
+        </div>
       </section>
 
-      <section id="errorBox" class="card error-box hidden" role="alert"></section>
+      <!-- ERROR -->
+      <div id="errorBox" class="error-box hidden" role="alert">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.4"/><path d="M8 5v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="11.5" r=".8" fill="currentColor"/></svg>
+        <span id="errorText"></span>
+      </div>
 
-      <section id="outputSection" class="card output-section hidden">
-        <h2>Hasil Highlight Inline</h2>
-        <div id="analysisInfoBar" class="analysis-info-bar hidden">
-          <span id="infoThreshold" class="analysis-info-pill analysis-info-pill--thresh"></span>
-          <span id="infoTopicModel" class="analysis-info-pill analysis-info-pill--topic"></span>
+      <!-- OUTPUT -->
+      <section id="outputSection" class="card output-card hidden">
+
+        <!-- Verdict -->
+        <div id="verdictBanner" class="verdict-banner hidden">
+          <div class="verdict-banner__left">
+            <div id="verdictIcon" class="verdict-icon" aria-hidden="true"></div>
+            <div class="verdict-banner__text">
+              <div id="verdictLabel" class="verdict-label"></div>
+              <div id="verdictConf" class="verdict-conf"></div>
+            </div>
+          </div>
+          <div id="verdictTopic" class="verdict-topic hidden"></div>
         </div>
-        <p id="globalSummary" class="global-summary"></p>
+
+        <div class="section-divider"></div>
+
+        <div class="card__label" style="margin-bottom:12px;">Highlight Kalimat</div>
+        <div id="globalSummary" class="global-summary"></div>
         <div id="outputParagraphs" class="paragraph-list"></div>
       </section>
 
-      <details id="confidenceDetails" class="card confidence-section hidden">
-        <summary id="confidenceSummary">Rincian Keyakinan</summary>
+      <!-- CONFIDENCE DETAILS -->
+      <details id="confidenceDetails" class="card confidence-card hidden">
+        <summary id="confidenceSummary" class="confidence-summary">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="2" y="2" width="12" height="12" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M5 8h6M8 5v6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+          Rincian Keyakinan per Kalimat
+        </summary>
         <ul id="confidenceList" class="confidence-list"></ul>
       </details>
+
+      <!-- MODEL INFO -->
+      <section class="card model-card">
+        <div class="card__label">Informasi Model &amp; Evaluasi</div>
+
+        <div class="model-arch">
+          <div class="arch-row">
+            <div class="arch-item">
+              <div class="arch-key">Model Klasifikasi</div>
+              <div class="arch-val"><code>indolem/indobert-base-uncased</code></div>
+            </div>
+            <div class="arch-item">
+              <div class="arch-key">Model Topik</div>
+              <div class="arch-val">BERTopic + paraphrase-multilingual-MiniLM-L12-v2</div>
+            </div>
+            <div class="arch-item">
+              <div class="arch-key">Dataset</div>
+              <div class="arch-val">172.174 dokumen · 5 sumber · 6,9% hoaks</div>
+            </div>
+            <div class="arch-item">
+              <div class="arch-key">Threshold Optimal</div>
+              <div class="arch-val">0.62 (dikalibrasi pada validation set)</div>
+            </div>
+            <div class="arch-item">
+              <div class="arch-key">Split Data</div>
+              <div class="arch-val">Train 70% · Val 15% · Test 15%</div>
+            </div>
+            <div class="arch-item">
+              <div class="arch-key">Tanggal Training</div>
+              <div class="arch-val">10 April 2026 · Transformers 5.0.0</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="metrics-strip">
+          <div class="metric-chip">
+            <div class="metric-chip__val">99.83%</div>
+            <div class="metric-chip__key">Akurasi<br/>Test</div>
+          </div>
+          <div class="metric-chip">
+            <div class="metric-chip__val">98.74%</div>
+            <div class="metric-chip__key">F1-Hoaks<br/>Test</div>
+          </div>
+          <div class="metric-chip">
+            <div class="metric-chip__val">99.92%</div>
+            <div class="metric-chip__key">AUC-ROC<br/>Test</div>
+          </div>
+          <div class="metric-chip">
+            <div class="metric-chip__val">99.32%</div>
+            <div class="metric-chip__key">Presisi<br/>Hoaks Test</div>
+          </div>
+          <div class="metric-chip">
+            <div class="metric-chip__val">98.16%</div>
+            <div class="metric-chip__key">Recall<br/>Hoaks Test</div>
+          </div>
+          <div class="metric-chip">
+            <div class="metric-chip__val">610</div>
+            <div class="metric-chip__key">Topik<br/>BERTopic</div>
+          </div>
+        </div>
+
+        <div class="eval-tabs" role="tablist">
+          <button class="eval-tab eval-tab--active" role="tab" aria-selected="true" data-tab="cm">Confusion Matrix</button>
+          <button class="eval-tab" role="tab" aria-selected="false" data-tab="roc">ROC Curve</button>
+          <button class="eval-tab" role="tab" aria-selected="false" data-tab="topic">Topik BERTopic</button>
+          <button class="eval-tab" role="tab" aria-selected="false" data-tab="ctfidf">c-TF-IDF</button>
+          <button class="eval-tab" role="tab" aria-selected="false" data-tab="dataset">Dataset</button>
+        </div>
+
+        <div class="eval-panels">
+
+          <div class="eval-panel eval-panel--active" data-panel="cm">
+            <p class="eval-caption">Confusion matrix menunjukkan jumlah prediksi benar dan salah — membantu mengidentifikasi seberapa besar model menghasilkan false positive (fakta dikira hoaks) dan false negative (hoaks lolos deteksi).</p>
+            <div class="eval-img-row">
+              <figure class="eval-figure">
+                <img src="/hasil/confusion_matrix_validation.png" alt="Confusion Matrix Validation" loading="lazy" />
+                <figcaption>Validation Set</figcaption>
+              </figure>
+              <figure class="eval-figure">
+                <img src="/hasil/confusion_matrix_test.png" alt="Confusion Matrix Test" loading="lazy" />
+                <figcaption>Test Set</figcaption>
+              </figure>
+            </div>
+          </div>
+
+          <div class="eval-panel" data-panel="roc">
+            <p class="eval-caption">ROC curve memperlihatkan kemampuan model membedakan kelas di berbagai threshold — AUC mendekati 1.0 menandakan diskriminasi yang sangat baik antara berita hoaks dan fakta.</p>
+            <div class="eval-img-row">
+              <figure class="eval-figure">
+                <img src="/hasil/roc_curve_validation.png" alt="ROC Validation" loading="lazy" />
+                <figcaption>Validation · AUC = 0.9994</figcaption>
+              </figure>
+              <figure class="eval-figure">
+                <img src="/hasil/roc_curve_test.png" alt="ROC Test" loading="lazy" />
+                <figcaption>Test · AUC = 0.9992</figcaption>
+              </figure>
+            </div>
+          </div>
+
+          <div class="eval-panel" data-panel="topic">
+            <p class="eval-caption">Distribusi 610 topik BERTopic pada korpus training menggambarkan keberagaman tema berita — diperlukan untuk memahami cakupan domain yang bisa dianalisis oleh model topik.</p>
+            <figure class="eval-figure eval-figure--full">
+              <img src="/hasil/distribusi_topik_bertopic.png" alt="Distribusi Topik" loading="lazy" />
+              <figcaption>Top-15 Topik BERTopic (corpus pra-oversampling, 120.521 dokumen)</figcaption>
+            </figure>
+            <figure class="eval-figure eval-figure--full" style="margin-top:14px;">
+              <img src="/hasil/topik_per_label.png" alt="Topik per Label" loading="lazy" />
+              <figcaption>Distribusi Topik Dominan per Label — Hoaks vs Non-Hoaks</figcaption>
+            </figure>
+          </div>
+
+          <div class="eval-panel" data-panel="ctfidf">
+            <p class="eval-caption">Skor c-TF-IDF menunjukkan kata-kata paling khas per topik — kata dengan skor tinggi adalah pembeda utama yang digunakan BERTopic untuk mengklasifikasikan topik suatu dokumen.</p>
+            <figure class="eval-figure eval-figure--full">
+              <img src="/hasil/ctfidf_heatmap.png" alt="c-TF-IDF Heatmap" loading="lazy" />
+              <figcaption>Heatmap Skor c-TF-IDF — Top-5 Kata per Topik (maks 15 topik)</figcaption>
+            </figure>
+            <figure class="eval-figure eval-figure--full" style="margin-top:14px;">
+              <img src="/hasil/ctfidf_distribusi_topik.png" alt="Distribusi c-TF-IDF" loading="lazy" />
+              <figcaption>Jumlah Dokumen per Topik berdasarkan c-TF-IDF</figcaption>
+            </figure>
+          </div>
+
+          <div class="eval-panel" data-panel="dataset">
+            <p class="eval-caption">Distribusi dataset memperlihatkan komposisi label dan sumber data — penting untuk memahami potensi bias dan alasan dilakukannya oversampling kelas minoritas (hoaks) saat training.</p>
+            <figure class="eval-figure eval-figure--full">
+              <img src="/hasil/distribusi_dataset.png" alt="Distribusi Dataset" loading="lazy" />
+              <figcaption>Distribusi Label, Sumber, dan Panjang Teks Dataset</figcaption>
+            </figure>
+            <figure class="eval-figure eval-figure--full" style="margin-top:14px;">
+              <img src="/hasil/kalibrasi_threshold_validation.png" alt="Kalibrasi Threshold" loading="lazy" />
+              <figcaption>Kalibrasi Threshold pada Validation Set — Threshold Optimal: 0.62</figcaption>
+            </figure>
+          </div>
+
+        </div>
+      </section>
+
     </main>
 
     <script src="app.js" type="module"></script>
+
+    <script>
+      (function () {
+        var tabs   = document.querySelectorAll('.eval-tab');
+        var panels = document.querySelectorAll('.eval-panel');
+        tabs.forEach(function (tab) {
+          tab.addEventListener('click', function () {
+            var target = tab.dataset.tab;
+            tabs.forEach(function (t) {
+              t.classList.toggle('eval-tab--active', t.dataset.tab === target);
+              t.setAttribute('aria-selected', String(t.dataset.tab === target));
+            });
+            panels.forEach(function (p) {
+              p.classList.toggle('eval-panel--active', p.dataset.panel === target);
+            });
+          });
+        });
+      })();
+    </script>
+
   </body>
 </html>
