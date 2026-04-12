@@ -1,12 +1,18 @@
 """
-Indo Hoax Detector API — v3.1.0
+Indo Hoax Detector API — v3.2.0
 
-Perbaikan dari v3.0.0:
-[FIX-T1] THRESHOLD_OPTIMAL default diubah dari 0.39 → 0.62 (sesuai notebook)
-[FIX-E1] BERTopic inference menggunakan SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
-         bukan IndoBERT CLS. BERTopic dilatih dengan embedding ini — harus konsisten.
-[FIX-E2] _st_embedder dimuat sebagai singleton terpisah, dihapus dari GPU setelah
-         BERTopic selesai dimuat (tidak perlu menetap di memori selama classifier berjalan).
+[FIX-RC1] ROOT CAUSE inkonsistensi label dokumen vs highlight kalimat:
+  Versi sebelumnya menjalankan DUA inferensi terpisah:
+    1. _predict_proba([original_text]) → full text dipotong 256 token
+       → sinyal hoaks di luar 256 token pertama tidak terdeteksi
+       → document.label = "not_hoax" (SALAH)
+    2. _predict_proba(sentence_texts) → per kalimat (BENAR)
+       → sentence.label = "hoax"
+  Frontend membaca document.label untuk verdict dan sentence.label untuk highlight
+  → inkonsistensi tampilan.
+
+  Fix: hapus inferensi terpisah level dokumen. Jalankan HANYA inferensi per kalimat,
+  lalu agregasi hasilnya menjadi verdict dokumen. Satu sumber kebenaran.
 """
 
 import json
@@ -49,7 +55,6 @@ TOPIC_BERTOPIC_MODEL_ID = os.getenv(
     "TOPIC_BERTOPIC_MODEL_ID", "fjrmhri/deteksi_hoaks_bertopic"
 ).strip()
 
-# [FIX-E1] Model embedding BERTopic harus sama dengan yang dipakai saat training
 BERTOPIC_EMBED_MODEL_ID = os.getenv(
     "BERTOPIC_EMBED_MODEL_ID",
     "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
@@ -98,7 +103,6 @@ model.eval()
 
 ID2LABEL: Dict[int, str] = {0: "not_hoax", 1: "hoax"}
 
-# [FIX-T1] Default 0.62 sesuai THRESHOLD_OPTIMAL notebook
 _THRESHOLD_OPTIMAL: float = 0.62
 try:
     from huggingface_hub import hf_hub_download
@@ -157,8 +161,7 @@ PETA_KATEGORI: List[Tuple[str, set]] = [
     ("Bencana & Cuaca", {
         "gempa", "banjir", "cuaca", "bmkg", "tsunami", "longsor", "erupsi",
         "badai", "evakuasi", "korban", "mitigasi", "iklim", "hujan", "angin",
-        "kebakaran", "bencana", "bnpb", "bpbd", "kekeringan", "rob",
-        "topan",
+        "kebakaran", "bencana", "bnpb", "bpbd", "kekeringan", "rob", "topan",
     }),
     ("Olahraga", {
         "olahraga", "sepakbola", "futsal", "basket", "bulutangkis", "atlet",
@@ -222,8 +225,7 @@ def _kategorisasi_teks(teks: str) -> Optional[Tuple[str, float]]:
 
 
 # =========================
-# [FIX-E1] BERTopic + SentenceTransformer Singleton
-# BERTopic dilatih dengan paraphrase-multilingual-MiniLM-L12-v2 — harus konsisten.
+# BERTopic + SentenceTransformer Singleton
 # =========================
 
 _bertopic_model = None
@@ -245,7 +247,7 @@ def _load_bertopic_background():
             print(f"[INFO] Loading SentenceTransformer: {BERTOPIC_EMBED_MODEL_ID}")
             _st_embedder = SentenceTransformer(
                 BERTOPIC_EMBED_MODEL_ID,
-                device="cpu",  # jaga GPU untuk IndoBERT
+                device="cpu",
             )
             print("[INFO] BERTopic + embedder berhasil dimuat.")
         except Exception as e:
@@ -270,7 +272,7 @@ def _get_bertopic_components() -> Tuple[Optional[Any], Optional[Any]]:
 # FastAPI
 # =========================
 
-app = FastAPI(title="Indo Hoax Detector API", version="3.1.0")
+app = FastAPI(title="Indo Hoax Detector API", version="3.2.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -452,10 +454,10 @@ def _extract_not_hoax_probability(prob_dict: Dict[str, float], p_hoax: float) ->
 
 
 def analyze_risk(
-    prob_dict: Dict[str, float],
+    p_hoax: float,
     original_text: Optional[str] = None,
-) -> Tuple[float, str, str]:
-    p_hoax = _extract_hoax_probability(prob_dict)
+) -> Tuple[str, str]:
+    """Terima p_hoax langsung (bukan prob_dict) agar tidak ada ambiguitas."""
     thresh = _THRESHOLD_OPTIMAL
     if p_hoax > THRESH_HIGH:
         level = "high"
@@ -479,7 +481,7 @@ def analyze_risk(
         if level == "low":
             level = "medium"
         explanation += " Teks sangat pendek (< 5 kata), prediksi bisa kurang stabil."
-    return p_hoax, level, explanation
+    return level, explanation
 
 
 def _split_paragraphs(text: str) -> List[str]:
@@ -520,7 +522,7 @@ def _to_canonical_label(p_hoax: float, teks: Optional[str] = None) -> str:
 
 
 # =========================
-# [FIX-E1] BERTopic inference dengan SentenceTransformer
+# BERTopic inference dengan SentenceTransformer
 # =========================
 
 def _st_encode(texts: List[str], embedder) -> np.ndarray:
@@ -545,8 +547,7 @@ def _infer_topic_per_paragraf(texts: List[str]) -> List[TopicInfo]:
         if btm is not None and embedder is not None:
             try:
                 teks_subset = [texts[i] for i in idx_perlu_bertopic]
-                # [FIX-E1] Gunakan SentenceTransformer, bukan IndoBERT CLS
-                embeddings = _st_encode(teks_subset, embedder)
+                embeddings  = _st_encode(teks_subset, embedder)
                 topic_ids, _ = btm.transform(teks_subset, embeddings=embeddings)
                 for local_i, (global_i, tid) in enumerate(
                     zip(idx_perlu_bertopic, topic_ids)
@@ -578,11 +579,10 @@ def _infer_topic_per_paragraf(texts: List[str]) -> List[TopicInfo]:
 
 
 def _build_predict_response(prob_dict: Dict[str, float], original_text: str) -> PredictResponse:
-    label = max(prob_dict, key=prob_dict.get)
-    score = float(prob_dict[label])
-    p_hoax, risk_level, risk_explanation = analyze_risk(
-        prob_dict, original_text=original_text
-    )
+    label  = max(prob_dict, key=prob_dict.get)
+    score  = float(prob_dict[label])
+    p_hoax = _extract_hoax_probability(prob_dict)
+    risk_level, risk_explanation = analyze_risk(p_hoax, original_text=original_text)
     return PredictResponse(
         label=label,
         score=score,
@@ -607,10 +607,9 @@ def _maybe_log(sample_info: Dict):
 
 @app.get("/")
 def read_root():
-    btm, _ = _get_bertopic_components()
     return {
         "message": "Indo Hoax Detector API is running.",
-        "version": "3.1.0",
+        "version": "3.2.0",
         "model_id": MODEL_ID,
         "id2label": ID2LABEL,
         "threshold_optimal": _THRESHOLD_OPTIMAL,
@@ -657,6 +656,12 @@ def predict_batch(request: BatchPredictRequest):
 
 @app.post("/analyze", response_model=AnalyzeResponse)
 def analyze(request: AnalyzeRequest):
+    """
+    [FIX-RC1] Satu sumber kebenaran: hanya inferensi per kalimat.
+    Verdict dokumen (label, hoax_probability, confidence) diturunkan dari
+    agregasi kalimat — bukan dari inferensi terpisah pada teks penuh yang
+    dipotong 256 token.
+    """
     original_text = _normalize_unit_text(request.text)
 
     base_meta = AnalyzeMeta(
@@ -681,19 +686,7 @@ def analyze(request: AnalyzeRequest):
             paragraphs=[], shared_topics=[], topics_global=None, meta=base_meta,
         )
 
-    doc_prob_list = _predict_proba([original_text], batch_size=1)
-    doc_prob_dict = doc_prob_list[0] if doc_prob_list else {"not_hoax": 1.0, "hoax": 0.0}
-
-    p_hoax_doc     = _extract_hoax_probability(doc_prob_dict)
-    p_not_hoax_doc = _extract_not_hoax_probability(doc_prob_dict, p_hoax_doc)
-    doc_label      = _to_canonical_label(p_hoax_doc)
-    doc_conf       = max(p_hoax_doc, p_not_hoax_doc)
-
-    _, risk_level, risk_explanation = analyze_risk(
-        {"not_hoax": p_not_hoax_doc, "hoax": p_hoax_doc},
-        original_text=original_text,
-    )
-
+    # ── Step 1: split paragraf & kalimat ──────────────────────────
     paragraph_texts = _split_paragraphs(original_text)
     sentence_texts: List[str] = []
     sentence_map:   List[Tuple[int, int]] = []
@@ -702,8 +695,10 @@ def analyze(request: AnalyzeRequest):
             sentence_texts.append(sentence)
             sentence_map.append((p_idx, s_idx))
 
+    # ── Step 2: inferensi PER KALIMAT (satu-satunya inferensi) ────
     sentence_prob_list = _predict_proba(sentence_texts, batch_size=SENTENCE_BATCH_SIZE)
 
+    # ── Step 3: bangun SentenceAnalysis ───────────────────────────
     paragraph_sentences: List[List[SentenceAnalysis]] = [[] for _ in paragraph_texts]
     for (p_idx, s_idx), sent_text, sent_prob_dict in zip(
         sentence_map, sentence_texts, sentence_prob_list
@@ -722,6 +717,35 @@ def analyze(request: AnalyzeRequest):
             color=_sentence_color(sent_label, sent_conf),
         ))
 
+    # ── Step 4: agregasi kalimat → verdict dokumen ─────────────────
+    # [FIX-RC1] Tidak ada inferensi terpisah pada teks penuh.
+    # document.label dan document.hoax_probability diturunkan dari kalimat.
+    all_sentences_flat = [s for plist in paragraph_sentences for s in plist]
+    hoax_sentence_count     = sum(1 for s in all_sentences_flat if s.label == "hoax")
+    not_hoax_sentence_count = sum(1 for s in all_sentences_flat if s.label == "not_hoax")
+
+    if all_sentences_flat:
+        # Rata-rata P(hoaks) dari semua kalimat — representatif untuk dokumen
+        p_hoax_doc = float(
+            sum(s.hoax_probability for s in all_sentences_flat) / len(all_sentences_flat)
+        )
+    else:
+        p_hoax_doc = 0.0
+
+    p_not_hoax_doc = float(max(0.0, min(1.0, 1.0 - p_hoax_doc)))
+
+    # Majority vote kalimat menentukan label dokumen
+    doc_label = "hoax" if hoax_sentence_count > not_hoax_sentence_count else "not_hoax"
+
+    # Confidence = keyakinan ke arah label yang menang
+    doc_conf = p_hoax_doc if doc_label == "hoax" else p_not_hoax_doc
+
+    risk_level, risk_explanation = analyze_risk(p_hoax_doc, original_text=original_text)
+
+    # sentence_aggregate_label identik dengan doc_label (keduanya dari votes kalimat)
+    sentence_aggregate_label = doc_label
+
+    # ── Step 5: topik per paragraf ─────────────────────────────────
     per_paragraph_topics = _infer_topic_per_paragraf(paragraph_texts)
 
     if request.topic_per_paragraph:
@@ -734,27 +758,27 @@ def analyze(request: AnalyzeRequest):
             _FALLBACK_TOPIC,
         )
 
+    # ── Step 6: bangun ParagraphAnalysis ──────────────────────────
     paragraphs: List[ParagraphAnalysis] = []
-    hoax_sentence_count     = 0
-    not_hoax_sentence_count = 0
-
     for p_idx, p_text in enumerate(paragraph_texts):
         sents  = sorted(paragraph_sentences[p_idx], key=lambda x: x.sentence_index)
         n_hoax = sum(1 for s in sents if s.label == "hoax")
         n_not  = sum(1 for s in sents if s.label == "not_hoax")
-        hoax_sentence_count     += n_hoax
-        not_hoax_sentence_count += n_not
 
         if sents:
             p_max_hoax = max(s.hoax_probability for s in sents)
-            p_label = "hoax" if n_hoax > n_not else "not_hoax"
-            p_conf  = max(p_max_hoax, 1.0 - p_max_hoax)
+            p_label    = "hoax" if n_hoax > n_not else "not_hoax"
+            p_conf     = p_max_hoax if p_label == "hoax" else (1.0 - p_max_hoax)
         else:
             p_max_hoax = 0.0
             p_label    = "not_hoax"
             p_conf     = 0.0
 
-        topic_info = per_paragraph_topics[p_idx] if p_idx < len(per_paragraph_topics) else _FALLBACK_TOPIC
+        topic_info = (
+            per_paragraph_topics[p_idx]
+            if p_idx < len(per_paragraph_topics)
+            else _FALLBACK_TOPIC
+        )
         paragraphs.append(ParagraphAnalysis(
             paragraph_index=int(p_idx),
             text=p_text,
@@ -764,10 +788,6 @@ def analyze(request: AnalyzeRequest):
             topic=topic_info,
             sentences=sents,
         ))
-
-    sentence_aggregate_label = (
-        "hoax" if hoax_sentence_count > not_hoax_sentence_count else "not_hoax"
-    )
 
     shared_topic_map: Dict[str, List[int]] = defaultdict(list)
     for p in paragraphs:
@@ -783,6 +803,7 @@ def analyze(request: AnalyzeRequest):
         "doc_label": doc_label,
         "doc_p_hoax": p_hoax_doc,
         "paragraph_count": len(paragraphs),
+        "hoax_sentence_count": hoax_sentence_count,
     })
 
     return AnalyzeResponse(
