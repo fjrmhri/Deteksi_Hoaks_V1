@@ -1,18 +1,22 @@
 """
-Indo Hoax Detector API — v3.2.0
+Indo Hoax Detector API — v3.3.1
 
-[FIX-RC1] ROOT CAUSE inkonsistensi label dokumen vs highlight kalimat:
-  Versi sebelumnya menjalankan DUA inferensi terpisah:
-    1. _predict_proba([original_text]) → full text dipotong 256 token
-       → sinyal hoaks di luar 256 token pertama tidak terdeteksi
-       → document.label = "not_hoax" (SALAH)
-    2. _predict_proba(sentence_texts) → per kalimat (BENAR)
-       → sentence.label = "hoax"
-  Frontend membaca document.label untuk verdict dan sentence.label untuk highlight
-  → inkonsistensi tampilan.
-
-  Fix: hapus inferensi terpisah level dokumen. Jalankan HANYA inferensi per kalimat,
-  lalu agregasi hasilnya menjadi verdict dokumen. Satu sumber kebenaran.
+[FIX-RC1] v3.2.0: Hapus dual inference, gunakan agregasi kalimat.
+[FIX-RC2] v3.3.0: Tambah _aggregate_verdict dengan tie-breaking → hoaks.
+[FIX-RC3] v3.3.1: Perbaiki bias Rule-1 di _aggregate_verdict:
+  v3.3.0 Rule-1 — max(P_hoaks) >= THRESH_HIGH (0.80) → auto hoaks.
+  Akibat: 6 kalimat fakta + 1 kalimat hoaks (P=0.93) → verdict HOAKS (SALAH).
+  Rule-1 terlalu bias ke 1 kalimat ekstrem tanpa memperhitungkan mayoritas.
+  Fix: Hapus Rule-1. Gunakan murni majority vote dengan tie-breaking → hoaks.
+  Logika akhir:
+    - hoax_count >= not_hoax_count AND hoax_count > 0 → hoaks (tie → hoaks)
+    - Sisanya → fakta
+  Confidence dari sisi yang menang:
+    - Hoaks → mean P(hoaks) kalimat berlabel hoaks
+    - Fakta → mean P(fakta) kalimat berlabel fakta
+  p_hoax_doc → selalu mean seluruh kalimat (representatif & informatif).
+[FIX-PC1] v3.3.0: Perluas PETA_KATEGORI — tambah sinonim, negara, militer,
+    keamanan, dan variasi bahasa Indonesia.
 """
 
 import json
@@ -116,7 +120,7 @@ except Exception as _e:
 
 
 # =========================
-# Hard Mapping Kategori (Rule-based)
+# [FIX-PC1] PETA_KATEGORI — diperluas dengan sinonim & konteks
 # =========================
 
 PETA_KATEGORI: List[Tuple[str, set]] = [
@@ -125,12 +129,25 @@ PETA_KATEGORI: List[Tuple[str, set]] = [
         "kpk", "pembunuhan", "penipuan", "sidang", "vonis", "kriminal",
         "penyidikan", "jaksa", "hakim", "ditangkap", "ditahan", "terdakwa",
         "dakwaan", "kejaksaan", "mahkamah", "peradilan", "pidana", "perdata",
+        "polri", "rutan", "lapas", "napi", "tahanan", "bui", "sel",
+        "persidangan", "putusan", "hukuman", "denda", "banding", "kasasi",
+        "penggeledahan", "penyitaan", "rekonstruksi", "otopsi", "visum",
+        "tipikor", "suap", "gratifikasi", "pencucian", "pemalsuan",
+        "penganiayaan", "pencurian", "perampokan", "narkoba", "narkotika",
+        "pelecehan", "pemerkosaan", "kejahatan", "pelaku", "korban kriminal",
     }),
     ("Politik", {
         "pemilu", "pilkada", "dpr", "partai", "kampanye", "bawaslu", "kpu",
         "pilpres", "caleg", "koalisi", "oposisi", "legislasi", "debat",
         "konstitusi", "suara", "demokrat", "golkar", "pdip", "gerindra",
         "pks", "dpd", "mpr", "fraksi", "legislatif", "senator",
+        "dprd", "pilwalkot", "pilgub", "pilbup", "capres", "cawapres",
+        "paslon", "petahana", "tim sukses", "quick count", "real count",
+        "rekap suara", "money politics", "politik uang", "black campaign",
+        "kampanye hitam", "hoaks politik", "propaganda", "agitasi",
+        "referendum", "demokrasi", "oligarki", "populisme", "nasionalisme",
+        "pkb", "ppp", "pan", "nasdem", "hanura", "perindo", "psi",
+        "pemilih", "suara rakyat", "kebijakan publik", "anggaran negara",
     }),
     ("Nasional & Pemerintahan", {
         "kementerian", "menteri", "kebijakan", "asn", "pns", "pemerintah",
@@ -138,6 +155,13 @@ PETA_KATEGORI: List[Tuple[str, set]] = [
         "pembangunan", "gubernur", "bupati", "walikota", "dprd", "pemda",
         "anggaran", "apbn", "apbd", "perpres", "perda", "kabinet",
         "wapres", "jokowi", "prabowo",
+        "sekretariat", "lembaga", "badan", "komisi", "dirjen", "direktorat",
+        "keppres", "inpres", "pp", "uu", "ruu", "peraturan", "undang-undang",
+        "ibu kota nusantara", "ikn", "brin", "bpk", "bpn", "bps",
+        "kemendag", "kemenhub", "kemenkes", "kemendikbud", "kementan",
+        "aparatur", "birokrasi", "reformasi birokrasi", "e-government",
+        "pengadaan", "tender", "proyek nasional", "infrastruktur nasional",
+        "bansos", "bantuan sosial", "subsidi", "blt", "pkh",
     }),
     ("Ekonomi & Bisnis", {
         "ekonomi", "saham", "investasi", "inflasi", "bank", "keuangan",
@@ -145,54 +169,168 @@ PETA_KATEGORI: List[Tuple[str, set]] = [
         "startup", "bisnis", "perdagangan", "rupiah", "dolar", "kurs",
         "bi", "ojk", "bumn", "swasta", "perusahaan", "modal", "aset",
         "defisit", "surplus", "neraca", "pdb", "gdp",
+        "inflasi", "deflasi", "resesi", "stagflasi", "suku bunga",
+        "kredit", "pinjaman", "utang", "obligasi", "saham", "dividen",
+        "bursa efek", "bei", "forex", "valuta", "mata uang",
+        "pertumbuhan ekonomi", "kemiskinan", "pengangguran", "lapangan kerja",
+        "upah", "gaji", "phk", "tenaga kerja", "buruh", "pekerja",
+        "industri", "manufaktur", "produksi", "ekspansi", "merger",
+        "akuisisi", "ipo", "go public", "e-commerce", "marketplace",
+        "fintech", "kripto", "bitcoin", "blockchain", "digital economy",
+        "harga bahan pokok", "sembako", "beras", "minyak goreng", "bbm",
     }),
     ("Kesehatan", {
         "kesehatan", "penyakit", "dokter", "virus", "vaksin",
         "obat", "bpjs", "pandemi", "medis", "gejala", "terapi", "pasien",
         "klinis", "covid", "kemenkes", "epidemi", "wabah", "imunisasi",
         "apotek", "farmasi", "faskes", "puskesmas", "nakes",
+        "rumah sakit", "rs", "poliklinik", "igd", "icu", "rawat inap",
+        "rawat jalan", "operasi", "bedah", "diagnosa", "resep",
+        "kanker", "diabetes", "hipertensi", "jantung", "stroke",
+        "dbd", "malaria", "tbc", "hiv", "aids", "hepatitis",
+        "mpox", "cacar", "flu", "demam", "batuk", "sesak napas",
+        "lockdown", "karantina", "isolasi", "klaster", "herd immunity",
+        "booster", "dosis", "suntik", "vaksinasi", "pfizer", "sinovac",
+        "herbal", "jamu", "suplemen", "vitamin", "nutrisi", "gizi",
+        "stunting", "gizi buruk", "obesitas", "kesehatan jiwa",
     }),
     ("Teknologi & Sains", {
         "teknologi", "internet", "aplikasi", "digital", "siber", "hacker",
         "inovasi", "satelit", "algoritma", "data", "ai", "kecerdasan",
         "buatan", "software", "hardware", "smartphone", "kominfo", "server",
         "cloud", "robot",
+        "artificial intelligence", "machine learning", "deep learning",
+        "big data", "iot", "internet of things", "5g", "metaverse",
+        "virtual reality", "vr", "augmented reality", "ar",
+        "keamanan siber", "cybersecurity", "ransomware", "phishing",
+        "kebocoran data", "privasi digital", "enkripsi", "firewall",
+        "coding", "programming", "developer", "startup teknologi",
+        "komputasi", "prosesor", "chip", "semikonduktor",
+        "drone", "luar angkasa", "roket", "wahana", "lapan", "brin",
+        "riset", "penelitian", "jurnal", "ilmiah", "laboratorium",
     }),
     ("Bencana & Cuaca", {
         "gempa", "banjir", "cuaca", "bmkg", "tsunami", "longsor", "erupsi",
         "badai", "evakuasi", "korban", "mitigasi", "iklim", "hujan", "angin",
         "kebakaran", "bencana", "bnpb", "bpbd", "kekeringan", "rob", "topan",
+        "bencana alam", "force majeure", "tanah bergerak", "abrasi",
+        "angin puting beliung", "tornado", "siklon", "hujan es",
+        "banjir bandang", "banjir rob", "banjir lahar", "awan panas",
+        "gunung berapi", "vulkanik", "aktivitas seismik", "magnitudo",
+        "skala richter", "peringatan dini", "sirine", "tsunami warning",
+        "pengungsian", "shelter", "posko", "bantuan bencana",
+        "cuaca ekstrem", "el nino", "la nina", "perubahan iklim",
     }),
     ("Olahraga", {
         "olahraga", "sepakbola", "futsal", "basket", "bulutangkis", "atlet",
         "turnamen", "medali", "piala", "fifa", "aff", "liga", "stadion",
         "pertandingan", "klub", "pssi", "pbsi", "olimpiade",
         "voli", "tenis", "badminton", "pemain", "pelatih",
+        "sea games", "asian games", "world cup", "euro", "copa",
+        "premier league", "serie a", "la liga", "bundesliga", "liga 1",
+        "timnas", "persib", "persija", "arema", "bali united",
+        "gol", "kartu merah", "kartu kuning", "offside", "penalti",
+        "skor", "klasemen", "degradasi", "promosi", "transfer pemain",
+        "sprint", "maraton", "lari", "renang", "senam", "tinju", "mma",
+        "e-sports", "gaming kompetitif", "esports",
+    }),
+    ("Keamanan & Pertahanan", {
+        "militer", "tni", "angkatan darat", "angkatan laut", "angkatan udara",
+        "tentara", "prajurit", "pasukan", "batalyon", "komando",
+        "pertahanan", "senjata", "amunisi", "peluru", "meriam", "tank",
+        "pesawat tempur", "kapal perang", "kapal selam", "frigate",
+        "operasi militer", "latihan militer", "manuver", "gelar pasukan",
+        "konflik bersenjata", "perang saudara", "gerilya", "insurgensi",
+        "teror", "teroris", "bom", "ledakan", "serangan", "penembakan",
+        "separatis", "papua", "kkb", "opm", "kelompok bersenjata",
+        "natuna", "laut china selatan", "kedaulatan wilayah", "perbatasan",
+        "pertahanan nasional", "kemenhan", "mabes tni", "panglima",
+        "densus 88", "brimob", "kopassus", "kostrad", "marinir",
+        "intel", "intelijen", "bais", "bnpt", "deradikalisasi",
+        "pangkalan militer", "alutsista", "alutsista baru",
     }),
     ("Internasional", {
         "diplomasi", "perang", "konflik", "pbb", "nato", "geopolitik",
         "internasional", "sanksi", "asean", "g20", "kedutaan", "wna", "visa",
+        "rusia", "russia", "ukraina", "ukraine", "amerika", "as", "usa",
+        "china", "cina", "tiongkok", "taiwan", "hongkong",
+        "eropa", "uni eropa", "inggris", "jerman", "perancis", "italia",
+        "jepang", "korea selatan", "korea utara", "india", "pakistan",
+        "iran", "arab saudi", "israel", "palestina", "gaza", "lebanon",
+        "suriah", "irak", "afghanistan", "turki", "mesir", "nigeria",
+        "australia", "kanada", "brazil", "meksiko",
+        "hubungan bilateral", "hubungan multilateral", "perjanjian",
+        "kerja sama internasional", "kunjungan kenegaraan", "state visit",
+        "konferensi internasional", "summit", "ktt",
+        "embargo", "blokade", "resolusi pbb", "dewan keamanan pbb",
+        "who", "imf", "world bank", "wto", "apec",
+        "pengungsi", "imigran", "asylum", "deportasi",
+        "hak asasi manusia", "ham internasional", "amnesty international",
+        "mata-mata", "espionase", "perang proxy", "perang dagang",
     }),
     ("Pendidikan", {
         "sekolah", "guru", "siswa", "mahasiswa", "kampus", "universitas",
         "beasiswa", "kurikulum", "ujian", "akademik", "riset",
         "kemendikbud", "snbp", "snbt", "sma", "smp", "sd", "dosen",
         "rektor", "fakultas",
+        "pelajar", "murid", "pengajar", "pendidik", "tenaga pendidik",
+        "perguruan tinggi", "pt", "prodi", "jurusan", "semester",
+        "ipk", "skripsi", "tesis", "disertasi", "wisuda", "ijazah",
+        "akreditasi", "bsnp", "kemdikbud", "dikti",
+        "un", "ujian nasional", "seleksi masuk", "snmptn", "sbmptn",
+        "ppdb", "penerimaan peserta didik", "zonasi", "jalur prestasi",
+        "literasi", "numerasi", "kompetensi", "sertifikasi guru",
+        "tunjangan guru", "p3k", "cpns guru",
+        "bimbel", "les", "kursus", "pelatihan", "vokasi", "smk",
+        "pendidikan karakter", "anti bullying", "perundungan",
     }),
     ("Transportasi & Infrastruktur", {
         "jalan", "tol", "kereta", "bandara", "pelabuhan", "transportasi",
         "kendaraan", "mrt", "lrt", "bus", "pesawat", "kapal",
         "terminal", "stasiun", "garuda", "kemenhub",
+        "krl", "kereta cepat", "whoosh", "kai", "damri", "transjakarta",
+        "ojek online", "gojek", "grab", "taksi", "angkutan umum",
+        "jalan tol", "tol trans jawa", "tol trans sumatera",
+        "jembatan", "flyover", "underpass", "terowongan",
+        "bandara soetta", "bandara internasional", "runway",
+        "maskapai", "lion air", "batik air", "citilink", "airasia",
+        "kapal laut", "pelni", "asdp", "ferry",
+        "kecelakaan lalu lintas", "kemacetan", "tilang",
+        "sim", "stnk", "kir", "emisi kendaraan",
+        "bbm", "spbu", "subsidi bbm", "pertamax", "pertalite",
     }),
     ("Lingkungan & Energi", {
         "lingkungan", "energi", "listrik", "minyak", "gas", "emisi",
         "polusi", "tambang", "pln", "pertamina", "karbon",
         "hutan", "deforestasi", "sawit", "sampah",
+        "perubahan iklim", "climate change", "pemanasan global",
+        "emisi karbon", "co2", "gas rumah kaca", "net zero",
+        "energi terbarukan", "panel surya", "turbin angin", "pltm",
+        "pltu", "pltn", "nuklir", "geothermal", "panas bumi",
+        "batu bara", "batubara", "gas alam", "lng", "lpg",
+        "illegal logging", "pembalakan liar", "kebakaran hutan",
+        "asap", "kabut asap", "karhutla",
+        "pencemaran", "polusi udara", "polusi air", "polusi tanah",
+        "limbah", "limbah industri", "limbah b3", "sampah plastik",
+        "daur ulang", "zero waste", "bank sampah",
+        "konservasi", "satwa liar", "biodiversitas", "ekosistem",
+        "mangrove", "terumbu karang", "laut bersih",
+        "tambang nikel", "tambang emas", "tambang batu bara",
     }),
     ("Hiburan & Gaya Hidup", {
         "artis", "film", "musik", "konser", "selebritas", "bioskop", "drama",
         "viral", "sinetron", "festival", "influencer", "lifestyle", "seleb",
         "youtube", "instagram", "tiktok", "kuliner", "wisata",
+        "aktor", "aktris", "penyanyi", "band", "idol", "kpop", "anime",
+        "streaming", "netflix", "disney", "spotify", "podcast",
+        "game", "gaming", "esports", "twitch",
+        "fashion", "mode", "tren", "beauty", "skincare", "makeup",
+        "diet", "fitness", "gym", "olahraga gaya hidup",
+        "restoran", "kafe", "cafe", "food vlogger", "street food",
+        "destinasi wisata", "hotel", "resort", "villa",
+        "selebgram", "youtuber", "content creator", "buzzer",
+        "gosip", "scandal", "perceraian", "pernikahan seleb",
+        "award", "festival film", "box office",
     }),
 ]
 
@@ -245,10 +383,7 @@ def _load_bertopic_background():
             print(f"[INFO] Loading BERTopic dari: {TOPIC_BERTOPIC_MODEL_ID}")
             _bertopic_model = BERTopic.load(TOPIC_BERTOPIC_MODEL_ID)
             print(f"[INFO] Loading SentenceTransformer: {BERTOPIC_EMBED_MODEL_ID}")
-            _st_embedder = SentenceTransformer(
-                BERTOPIC_EMBED_MODEL_ID,
-                device="cpu",
-            )
+            _st_embedder = SentenceTransformer(BERTOPIC_EMBED_MODEL_ID, device="cpu")
             print("[INFO] BERTopic + embedder berhasil dimuat.")
         except Exception as e:
             print(f"[WARN] Gagal load BERTopic/embedder: {e}.")
@@ -272,7 +407,7 @@ def _get_bertopic_components() -> Tuple[Optional[Any], Optional[Any]]:
 # FastAPI
 # =========================
 
-app = FastAPI(title="Indo Hoax Detector API", version="3.2.0")
+app = FastAPI(title="Indo Hoax Detector API", version="3.3.1")
 
 app.add_middleware(
     CORSMiddleware,
@@ -453,19 +588,14 @@ def _extract_not_hoax_probability(prob_dict: Dict[str, float], p_hoax: float) ->
     return float(max(0.0, min(1.0, 1.0 - p_hoax)))
 
 
-def analyze_risk(
-    p_hoax: float,
-    original_text: Optional[str] = None,
-) -> Tuple[str, str]:
-    """Terima p_hoax langsung (bukan prob_dict) agar tidak ada ambiguitas."""
-    thresh = _THRESHOLD_OPTIMAL
+def analyze_risk(p_hoax: float, original_text: Optional[str] = None) -> Tuple[str, str]:
     if p_hoax > THRESH_HIGH:
         level = "high"
         explanation = (
             f"Model sangat yakin teks ini hoaks (P(hoaks) ≈ {p_hoax:.2%}). "
             "Jangan disebarkan sebelum ada klarifikasi resmi."
         )
-    elif p_hoax > max(THRESH_MED, thresh):
+    elif p_hoax > max(THRESH_MED, _THRESHOLD_OPTIMAL):
         level = "medium"
         explanation = (
             f"Model menilai teks ini berpotensi hoaks (P(hoaks) ≈ {p_hoax:.2%}). "
@@ -522,16 +652,13 @@ def _to_canonical_label(p_hoax: float, teks: Optional[str] = None) -> str:
 
 
 # =========================
-# BERTopic inference dengan SentenceTransformer
+# BERTopic inference
 # =========================
 
 def _st_encode(texts: List[str], embedder) -> np.ndarray:
     return embedder.encode(
-        texts,
-        batch_size=BERTOPIC_EMBED_BATCH,
-        show_progress_bar=False,
-        convert_to_numpy=True,
-        normalize_embeddings=True,
+        texts, batch_size=BERTOPIC_EMBED_BATCH,
+        show_progress_bar=False, convert_to_numpy=True, normalize_embeddings=True,
     )
 
 
@@ -584,11 +711,8 @@ def _build_predict_response(prob_dict: Dict[str, float], original_text: str) -> 
     p_hoax = _extract_hoax_probability(prob_dict)
     risk_level, risk_explanation = analyze_risk(p_hoax, original_text=original_text)
     return PredictResponse(
-        label=label,
-        score=score,
-        probabilities=prob_dict,
-        hoax_probability=float(p_hoax),
-        risk_level=risk_level,
+        label=label, score=score, probabilities=prob_dict,
+        hoax_probability=float(p_hoax), risk_level=risk_level,
         risk_explanation=risk_explanation,
     )
 
@@ -602,6 +726,70 @@ def _maybe_log(sample_info: Dict):
 
 
 # =========================
+# [FIX-RC2] Fungsi agregasi verdict dari kalimat
+# =========================
+
+def _aggregate_verdict(
+    all_sentences: List[SentenceAnalysis],
+) -> Tuple[str, float, float]:
+    """
+    Kembalikan (doc_label, p_hoax_doc, doc_conf).
+
+    [FIX-RC3] Logika final — murni majority vote:
+      Hoaks menang jika hoax_count >= not_hoax_count AND hoax_count > 0.
+      Tie (sama banyak) → hoaks (lebih aman untuk sistem deteksi).
+      Selain itu → fakta.
+
+    p_hoax_doc:
+      Selalu = mean P(hoaks) seluruh kalimat — representatif & informatif.
+      Ditampilkan frontend sebagai "P(hoaks): XX%".
+
+    doc_conf:
+      Confidence dari sisi yang menang, bukan dari mean keseluruhan:
+      - Hoaks → mean P(hoaks) kalimat berlabel hoaks
+      - Fakta → mean P(fakta) kalimat berlabel fakta
+
+    Contoh verifikasi:
+      6 fakta (P≈0.0002) + 1 hoaks (P=0.9346):
+        hoax_count=1 < not_hoax_count=6 → FAKTA
+        p_hoax_doc = 0.1352, doc_conf = 0.9998 (P(fakta) rata-rata) ✓
+
+      1 hoaks (P=0.9346) + 1 fakta (P≈0.0002):
+        hoax_count=1 == not_hoax_count=1 → tie → HOAKS
+        p_hoax_doc = 0.9346, doc_conf = 0.9346 ✓
+
+      3 hoaks + 4 fakta:
+        hoax_count=3 < not_hoax_count=4 → FAKTA ✓
+
+      3 hoaks + 3 fakta:
+        tie → HOAKS ✓
+    """
+    if not all_sentences:
+        return "not_hoax", 0.0, 0.0
+
+    hoax_sents     = [s for s in all_sentences if s.label == "hoax"]
+    not_hoax_sents = [s for s in all_sentences if s.label == "not_hoax"]
+    hoax_count     = len(hoax_sents)
+    not_hoax_count = len(not_hoax_sents)
+    mean_p_hoax    = float(
+        sum(s.hoax_probability for s in all_sentences) / len(all_sentences)
+    )
+
+    if hoax_count >= not_hoax_count and hoax_count > 0:
+        # Hoaks menang atau tie → hoaks
+        p_hoax_doc = float(
+            sum(s.hoax_probability for s in hoax_sents) / hoax_count
+        )
+        return "hoax", mean_p_hoax, p_hoax_doc
+
+    # Fakta menang
+    p_fakta_doc = float(
+        sum(1.0 - s.hoax_probability for s in not_hoax_sents) / not_hoax_count
+    ) if not_hoax_sents else 0.5
+    return "not_hoax", mean_p_hoax, p_fakta_doc
+
+
+# =========================
 # Routes
 # =========================
 
@@ -609,10 +797,11 @@ def _maybe_log(sample_info: Dict):
 def read_root():
     return {
         "message": "Indo Hoax Detector API is running.",
-        "version": "3.2.0",
+        "version": "3.3.1",
         "model_id": MODEL_ID,
         "id2label": ID2LABEL,
         "threshold_optimal": _THRESHOLD_OPTIMAL,
+        "thresh_high": THRESH_HIGH,
         "thresh_kalimat_pendek": THRESH_KALIMAT_PENDEK,
         "min_kata_kalimat": MIN_KATA_KALIMAT,
         "device": str(DEVICE),
@@ -656,17 +845,10 @@ def predict_batch(request: BatchPredictRequest):
 
 @app.post("/analyze", response_model=AnalyzeResponse)
 def analyze(request: AnalyzeRequest):
-    """
-    [FIX-RC1] Satu sumber kebenaran: hanya inferensi per kalimat.
-    Verdict dokumen (label, hoax_probability, confidence) diturunkan dari
-    agregasi kalimat — bukan dari inferensi terpisah pada teks penuh yang
-    dipotong 256 token.
-    """
     original_text = _normalize_unit_text(request.text)
 
     base_meta = AnalyzeMeta(
-        model_id=MODEL_ID,
-        max_length=MAX_LENGTH,
+        model_id=MODEL_ID, max_length=MAX_LENGTH,
         sentence_batch_size=SENTENCE_BATCH_SIZE,
         threshold_used=_THRESHOLD_OPTIMAL,
         topic_model_used="bertopic+rules",
@@ -686,7 +868,7 @@ def analyze(request: AnalyzeRequest):
             paragraphs=[], shared_topics=[], topics_global=None, meta=base_meta,
         )
 
-    # ── Step 1: split paragraf & kalimat ──────────────────────────
+    # Step 1: split
     paragraph_texts = _split_paragraphs(original_text)
     sentence_texts: List[str] = []
     sentence_map:   List[Tuple[int, int]] = []
@@ -695,10 +877,10 @@ def analyze(request: AnalyzeRequest):
             sentence_texts.append(sentence)
             sentence_map.append((p_idx, s_idx))
 
-    # ── Step 2: inferensi PER KALIMAT (satu-satunya inferensi) ────
+    # Step 2: inferensi per kalimat
     sentence_prob_list = _predict_proba(sentence_texts, batch_size=SENTENCE_BATCH_SIZE)
 
-    # ── Step 3: bangun SentenceAnalysis ───────────────────────────
+    # Step 3: bangun SentenceAnalysis
     paragraph_sentences: List[List[SentenceAnalysis]] = [[] for _ in paragraph_texts]
     for (p_idx, s_idx), sent_text, sent_prob_dict in zip(
         sentence_map, sentence_texts, sentence_prob_list
@@ -717,35 +899,17 @@ def analyze(request: AnalyzeRequest):
             color=_sentence_color(sent_label, sent_conf),
         ))
 
-    # ── Step 4: agregasi kalimat → verdict dokumen ─────────────────
-    # [FIX-RC1] Tidak ada inferensi terpisah pada teks penuh.
-    # document.label dan document.hoax_probability diturunkan dari kalimat.
+    # Step 4: [FIX-RC2] agregasi verdict dari kalimat
     all_sentences_flat = [s for plist in paragraph_sentences for s in plist]
     hoax_sentence_count     = sum(1 for s in all_sentences_flat if s.label == "hoax")
     not_hoax_sentence_count = sum(1 for s in all_sentences_flat if s.label == "not_hoax")
 
-    if all_sentences_flat:
-        # Rata-rata P(hoaks) dari semua kalimat — representatif untuk dokumen
-        p_hoax_doc = float(
-            sum(s.hoax_probability for s in all_sentences_flat) / len(all_sentences_flat)
-        )
-    else:
-        p_hoax_doc = 0.0
-
-    p_not_hoax_doc = float(max(0.0, min(1.0, 1.0 - p_hoax_doc)))
-
-    # Majority vote kalimat menentukan label dokumen
-    doc_label = "hoax" if hoax_sentence_count > not_hoax_sentence_count else "not_hoax"
-
-    # Confidence = keyakinan ke arah label yang menang
-    doc_conf = p_hoax_doc if doc_label == "hoax" else p_not_hoax_doc
+    doc_label, p_hoax_doc, doc_conf = _aggregate_verdict(all_sentences_flat)
+    sentence_aggregate_label = doc_label
 
     risk_level, risk_explanation = analyze_risk(p_hoax_doc, original_text=original_text)
 
-    # sentence_aggregate_label identik dengan doc_label (keduanya dari votes kalimat)
-    sentence_aggregate_label = doc_label
-
-    # ── Step 5: topik per paragraf ─────────────────────────────────
+    # Step 5: topik
     per_paragraph_topics = _infer_topic_per_paragraf(paragraph_texts)
 
     if request.topic_per_paragraph:
@@ -758,7 +922,7 @@ def analyze(request: AnalyzeRequest):
             _FALLBACK_TOPIC,
         )
 
-    # ── Step 6: bangun ParagraphAnalysis ──────────────────────────
+    # Step 6: bangun ParagraphAnalysis
     paragraphs: List[ParagraphAnalysis] = []
     for p_idx, p_text in enumerate(paragraph_texts):
         sents  = sorted(paragraph_sentences[p_idx], key=lambda x: x.sentence_index)
@@ -767,7 +931,7 @@ def analyze(request: AnalyzeRequest):
 
         if sents:
             p_max_hoax = max(s.hoax_probability for s in sents)
-            p_label    = "hoax" if n_hoax > n_not else "not_hoax"
+            p_label    = "hoax" if n_hoax >= n_not and n_hoax > 0 else "not_hoax"
             p_conf     = p_max_hoax if p_label == "hoax" else (1.0 - p_max_hoax)
         else:
             p_max_hoax = 0.0
@@ -802,8 +966,8 @@ def analyze(request: AnalyzeRequest):
         "route": "/analyze",
         "doc_label": doc_label,
         "doc_p_hoax": p_hoax_doc,
-        "paragraph_count": len(paragraphs),
         "hoax_sentence_count": hoax_sentence_count,
+        "paragraph_count": len(paragraphs),
     })
 
     return AnalyzeResponse(
