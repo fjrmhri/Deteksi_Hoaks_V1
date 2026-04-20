@@ -480,6 +480,7 @@ class BatchPredictRequest(BaseModel):
 class PredictResponse(BaseModel):
     label: str
     score: float
+    confidence: float
     probabilities: Dict[str, float]
     hoax_probability: float
     risk_level: str
@@ -759,10 +760,12 @@ def _build_predict_response(prob_dict: Dict[str, float], original_text: str) -> 
     p_not_hoax = _extract_not_hoax_probability(prob_dict, p_hoax)
     label = _to_canonical_label(p_hoax, teks=original_text)
     score = p_hoax if label == "hoax" else p_not_hoax
+    confidence = _round6(score)
     risk_level, risk_explanation = analyze_risk(p_hoax, original_text=original_text)
     return PredictResponse(
         label=label,
-        score=_round6(score),
+        score=confidence,
+        confidence=confidence,
         probabilities={
             "not_hoax": _round6(p_not_hoax),
             "hoax": _round6(p_hoax),
@@ -879,7 +882,7 @@ def predict(request: PredictRequest):
     prob_list = _predict_proba([original_text], batch_size=1)
     if not prob_list:
         return PredictResponse(
-            label="unknown", score=0.0, probabilities={},
+            label="unknown", score=0.0, confidence=0.0, probabilities={},
             hoax_probability=0.0, risk_level="low",
             risk_explanation="Teks kosong.",
         )
