@@ -71,6 +71,8 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 if torch.cuda.is_available():
     torch.set_float32_matmul_precision("high")
 
+_BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
+
 print("======================================")
 print(f"Loading IndoBERT dari Hub : {MODEL_ID}")
 print(f"Device                    : {DEVICE}")
@@ -107,14 +109,61 @@ model.eval()
 
 ID2LABEL: Dict[int, str] = {0: "not_hoax", 1: "hoax"}
 
-_THRESHOLD_OPTIMAL: float = 0.62
-try:
+_DEFAULT_THRESHOLD_OPTIMAL: float = 0.79
+_INFERENCE_CONFIG: Dict[str, Any] = {}
+_THRESHOLD_OPTIMAL: float = _DEFAULT_THRESHOLD_OPTIMAL
+
+
+def _read_inference_config(cfg_path: str) -> Dict[str, Any]:
+    with open(cfg_path, encoding="utf-8") as _f:
+        return json.load(_f)
+
+
+def _load_inference_config() -> Tuple[Dict[str, Any], str]:
     from huggingface_hub import hf_hub_download
-    _cfg_path = hf_hub_download(MODEL_ID, "inference_config.json")
-    with open(_cfg_path, encoding="utf-8") as _f:
-        _inf_cfg = json.load(_f)
-    _THRESHOLD_OPTIMAL = float(_inf_cfg.get("threshold_optimal", 0.62))
-    print(f"[INFO] threshold_optimal dari inference_config.json: {_THRESHOLD_OPTIMAL}")
+
+    try:
+        cfg_path = hf_hub_download(MODEL_ID, "inference_config.json")
+        return _read_inference_config(cfg_path), cfg_path
+    except Exception as hub_error:
+        local_candidates = (
+            os.path.join(_BACKEND_DIR, "inference_config.json"),
+            os.path.join(
+                os.path.dirname(_BACKEND_DIR),
+                "public",
+                "hasil",
+                "inference_config.json",
+            ),
+        )
+        for local_path in local_candidates:
+            if os.path.exists(local_path):
+                print(
+                    "[INFO] inference_config.json Hub tidak tersedia "
+                    f"({hub_error}). Pakai lokal: {local_path}"
+                )
+                return _read_inference_config(local_path), local_path
+        raise hub_error
+
+
+try:
+    _INFERENCE_CONFIG, _cfg_path = _load_inference_config()
+    _THRESHOLD_OPTIMAL = float(
+        _INFERENCE_CONFIG.get("threshold_optimal", _DEFAULT_THRESHOLD_OPTIMAL)
+    )
+    _cfg_id2label = _INFERENCE_CONFIG.get("id2label")
+    if isinstance(_cfg_id2label, dict):
+        _normalized_id2label = {}
+        for _k, _v in _cfg_id2label.items():
+            try:
+                _normalized_id2label[int(_k)] = str(_v)
+            except (TypeError, ValueError):
+                continue
+        if _normalized_id2label:
+            ID2LABEL = _normalized_id2label
+    print(
+        f"[INFO] threshold_optimal dari inference_config.json ({_cfg_path}): "
+        f"{_THRESHOLD_OPTIMAL}"
+    )
 except Exception as _e:
     print(f"[INFO] inference_config.json tidak tersedia ({_e}). Pakai {_THRESHOLD_OPTIMAL}")
 
@@ -706,13 +755,20 @@ def _infer_topic_per_paragraf(texts: List[str]) -> List[TopicInfo]:
 
 
 def _build_predict_response(prob_dict: Dict[str, float], original_text: str) -> PredictResponse:
-    label  = max(prob_dict, key=prob_dict.get)
-    score  = float(prob_dict[label])
     p_hoax = _extract_hoax_probability(prob_dict)
+    p_not_hoax = _extract_not_hoax_probability(prob_dict, p_hoax)
+    label = _to_canonical_label(p_hoax, teks=original_text)
+    score = p_hoax if label == "hoax" else p_not_hoax
     risk_level, risk_explanation = analyze_risk(p_hoax, original_text=original_text)
     return PredictResponse(
-        label=label, score=score, probabilities=prob_dict,
-        hoax_probability=float(p_hoax), risk_level=risk_level,
+        label=label,
+        score=_round6(score),
+        probabilities={
+            "not_hoax": _round6(p_not_hoax),
+            "hoax": _round6(p_hoax),
+        },
+        hoax_probability=_round6(p_hoax),
+        risk_level=risk_level,
         risk_explanation=risk_explanation,
     )
 
