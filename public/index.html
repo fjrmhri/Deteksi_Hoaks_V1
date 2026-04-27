@@ -129,9 +129,9 @@
               </div>
             </div>
             <div class="arch-item">
-              <div class="arch-key">Threshold Optimal</div>
+              <div class="arch-key">Threshold Runtime</div>
               <div class="arch-val">
-                0.34 &mdash; dikalibrasi pada validation set
+                0.34 &mdash; threshold optimal aktif dari validation set
               </div>
             </div>
             <div class="arch-item">
@@ -149,6 +149,7 @@
         <div class="model-block">
           <h3 class="model-block__heading">Metrik Evaluasi</h3>
           <div class="metric-list">
+            <div class="metric-group-title">IndoBERT · Test Set</div>
             <div class="metric-item">
               <div class="metric-item__header">
                 <span class="metric-item__name">Akurasi</span>
@@ -234,31 +235,30 @@
               </p>
             </div>
 
+            <div class="metric-group-title">BERTopic · Topic Modeling</div>
             <div class="metric-item">
               <div class="metric-item__header">
-                <span class="metric-item__name">Coherence c_v</span>
+                <span class="metric-item__name">Coherence (c_v)</span>
                 <span class="metric-item__val metric-item__val--green"
                   >0.4391</span
                 >
               </div>
               <p class="metric-item__desc">
-                Mengukur keterkaitan kata-kata utama dalam setiap topik
-                BERTopic. Nilai ini dihitung dari corpus BERTopic terpreproses
-                dan top words non-outlier.
+                Menilai kualitas representasi kata dalam topik BERTopic. Ini
+                bukan metrik klasifikasi dan bukan pengganti DBCV.
               </p>
             </div>
 
             <div class="metric-item">
               <div class="metric-item__header">
-                <span class="metric-item__name">DBCV / DBCS</span>
+                <span class="metric-item__name">DBCV (sampled)</span>
                 <span class="metric-item__val metric-item__val--green"
                   >0.6604</span
                 >
               </div>
               <p class="metric-item__desc">
-                Validasi cluster berbasis densitas untuk hasil UMAP + HDBSCAN.
-                Skor ini dihitung dalam mode sampled pada 30.000 titik, bukan
-                memakai elbow method klasik.
+                Metrik kualitas cluster berbasis densitas untuk UMAP + HDBSCAN.
+                Nilai ini dihitung pada sampel 30.000 titik, bukan full DBCV.
               </p>
             </div>
 
@@ -452,9 +452,9 @@
 
             <div class="eval-panel" data-panel="lain">
               <p class="eval-caption">
-                Grafik kalibrasi threshold menunjukkan proses pemilihan nilai
-                ambang keputusan 0.34 yang menghasilkan F1-Score terbaik pada
-                data validasi.
+                Grafik kalibrasi threshold menunjukkan pemilihan threshold
+                runtime 0.34 yang menghasilkan F1-Score terbaik pada data
+                validasi.
               </p>
               <figure class="eval-figure eval-figure--full">
                 <img
@@ -463,7 +463,7 @@
                   loading="lazy"
                 />
                 <figcaption>
-                  Kalibrasi threshold — nilai optimal: 0.34
+                  Kalibrasi threshold — threshold runtime: 0.34
                 </figcaption>
               </figure>
             </div>
