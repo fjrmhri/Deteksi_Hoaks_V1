@@ -968,15 +968,12 @@ def analyze(request: AnalyzeRequest):
     # Step 5: topik
     per_paragraph_topics = _infer_topic_per_paragraf(paragraph_texts)
 
-    if request.topic_per_paragraph:
-        topics_global = None
-    else:
-        label_counts: Counter = Counter(t.label for t in per_paragraph_topics)
-        most_common_label = label_counts.most_common(1)[0][0]
-        topics_global = next(
-            (t for t in per_paragraph_topics if t.label == most_common_label),
-            _FALLBACK_TOPIC,
-        )
+    label_counts: Counter = Counter(t.label for t in per_paragraph_topics)
+    most_common_label = label_counts.most_common(1)[0][0] if label_counts else None
+    topics_global = next(
+        (t for t in per_paragraph_topics if t.label == most_common_label),
+        _FALLBACK_TOPIC,
+    )
 
     # Step 6: bangun ParagraphAnalysis
     paragraphs: List[ParagraphAnalysis] = []

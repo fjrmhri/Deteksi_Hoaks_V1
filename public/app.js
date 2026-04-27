@@ -139,7 +139,7 @@ const detectSpinner = document.getElementById("detectSpinner");
 const resetBtn = document.getElementById("resetBtn");
 const newsText = document.getElementById("newsText");
 const sentenceLevelToggle = document.getElementById("sentenceLevelToggle");
-const topicToggle = document.getElementById("topicToggle"); // hidden, always false
+const topicToggle = document.getElementById("topicToggle");
 
 const statParagraphs = document.getElementById("statParagraphs");
 const statSentences = document.getElementById("statSentences");
@@ -360,6 +360,14 @@ function inferTopicLocal(paragraphText) {
   return { label, score: Number.isFinite(score) && score > 0 ? score : null };
 }
 
+function getParagraphTopicLabel(paragraph) {
+  const backendLabel = cleanTopicLabel(paragraph?.topic?.label);
+  if (backendLabel) return backendLabel;
+
+  const localTopic = inferTopicLocal(paragraph?.text);
+  return cleanTopicLabel(localTopic.label);
+}
+
 // ── UI state ──────────────────────────────────────────────────────
 
 function showError(message) {
@@ -450,7 +458,7 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = API_TIMEOUT_MS) {
   }
 }
 
-async function callAnalyzeApi(text, sentenceLevel) {
+async function callAnalyzeApi(text, sentenceLevel, topicPerParagraph) {
   if (!apiBaseUrl) throw new Error("API base URL kosong.");
   const endpoint = `${apiBaseUrl}/analyze`;
 
@@ -471,7 +479,7 @@ async function callAnalyzeApi(text, sentenceLevel) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         text,
-        topic_per_paragraph: false,
+        topic_per_paragraph: topicPerParagraph === true,
         sentence_level: sentenceLevel !== false,
       }),
     });
@@ -667,7 +675,7 @@ function joinHighlighted(sentences) {
 
 // ── Render output ─────────────────────────────────────────────────
 
-function renderOutput(payload, paragraphs, sentenceLevel) {
+function renderOutput(payload, paragraphs, sentenceLevel, topicPerParagraph) {
   if (!outputSection || !outputParagraphs || !globalSummary) return null;
   outputParagraphs.innerHTML = "";
 
@@ -696,10 +704,6 @@ function renderOutput(payload, paragraphs, sentenceLevel) {
     const block = document.createElement("article");
     block.className = "paragraph-block";
 
-    const meta = document.createElement("p");
-    meta.className = "paragraph-meta";
-    meta.textContent = `Paragraf ${pNum}`;
-
     const text = document.createElement("p");
     text.className = "paragraph-text";
 
@@ -719,7 +723,16 @@ function renderOutput(payload, paragraphs, sentenceLevel) {
       }
     }
 
-    block.appendChild(meta);
+    if (topicPerParagraph) {
+      const topicLabel = getParagraphTopicLabel(paragraph);
+      const meta = document.createElement("p");
+      meta.className = "paragraph-meta";
+      meta.textContent = topicLabel
+        ? `Paragraf ${pNum} · Topik: ${topicLabel}`
+        : `Paragraf ${pNum} · Topik belum tersedia`;
+      block.appendChild(meta);
+    }
+
     block.appendChild(text);
     fragment.appendChild(block);
   });
@@ -890,16 +903,26 @@ async function handleDetect() {
   const sentenceLevel = sentenceLevelToggle
     ? Boolean(sentenceLevelToggle.checked)
     : true;
+  const topicPerParagraph = topicToggle ? Boolean(topicToggle.checked) : false;
 
   setLoading(true);
   try {
-    const payload = await callAnalyzeApi(textToSend, sentenceLevel);
+    const payload = await callAnalyzeApi(
+      textToSend,
+      sentenceLevel,
+      topicPerParagraph,
+    );
     lastPayload = payload;
 
     renderVerdict(payload);
 
     const paragraphs = extractParagraphs(payload, textToSend);
-    const sm = renderOutput(payload, paragraphs, sentenceLevel);
+    const sm = renderOutput(
+      payload,
+      paragraphs,
+      sentenceLevel,
+      topicPerParagraph,
+    );
     renderConfidence(paragraphs, sentenceLevel, sm);
   } catch (err) {
     const msg =

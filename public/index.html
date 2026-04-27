@@ -59,14 +59,17 @@
           </p>
         </div>
 
-        <!-- topicToggle disembunyikan dari UI, logic JS tetap aktif -->
-        <input
-          type="checkbox"
-          id="topicToggle"
-          class="sr-only"
-          aria-hidden="true"
-          tabindex="-1"
-        />
+        <div class="topic-toggle-row">
+          <label class="topic-toggle" for="topicToggle">
+            <input type="checkbox" id="topicToggle" />
+            <span class="topic-toggle-switch" aria-hidden="true"></span>
+            <span class="topic-toggle-label">Tampilkan topik per paragraf</span>
+          </label>
+          <p class="topic-toggle-hint">
+            ON: setiap paragraf menampilkan topiknya · OFF: hasil tampil sebagai
+            berita utuh
+          </p>
+        </div>
 
         <p class="legend-note">
           <span class="legend legend--green">Hijau</span> = Fakta &nbsp;
