@@ -556,11 +556,37 @@ PARAGRAPH_SPLIT_RE = re.compile(r"(?:\r?\n){2,}")
 SENTENCE_SPLIT_RE  = re.compile(r'[^.!?]+(?:[.!?]+(?:[")\]]+)?)|[^.!?]+$')
 WS_RE              = re.compile(r"\s+")
 
-_FALLBACK_TOPIC = TopicInfo(label="topik_umum", score=0.0, keywords=["topik_umum"])
+_FALLBACK_TOPIC = TopicInfo(label="Topik Umum", score=0.0, keywords=["topik_umum"])
 
 
 def _round6(v: float) -> float:
     return float(round(float(v), 6))
+
+
+def _topic_kategori(
+    nama: str,
+    skor: float,
+    keywords: Optional[List[str]] = None,
+) -> TopicInfo:
+    return TopicInfo(
+        label=nama,
+        score=_round6(skor),
+        keywords=keywords if keywords else [nama],
+    )
+
+
+def _kategori_dari_keywords(keywords: List[str]) -> TopicInfo:
+    if not keywords:
+        return _FALLBACK_TOPIC
+    hasil = _kategorisasi_teks(" ".join(keywords))
+    if hasil is None:
+        return TopicInfo(
+            label=_FALLBACK_TOPIC.label,
+            score=_FALLBACK_TOPIC.score,
+            keywords=keywords,
+        )
+    nama, skor = hasil
+    return _topic_kategori(nama, skor, keywords)
 
 
 def _iter_chunks(items: List[str], chunk_size: int) -> Iterable[List[str]]:
@@ -731,11 +757,7 @@ def _infer_topic_per_paragraf(texts: List[str]) -> List[TopicInfo]:
                         continue
                     topic_words = btm.get_topic(tid) or []
                     keywords    = [w for w, _ in topic_words[:TOPIC_KEYWORDS_TOPK]]
-                    score       = float(topic_words[0][1]) if topic_words else 0.0
-                    label       = " / ".join(keywords[:2]) if keywords else f"topik_{tid}"
-                    bertopic_map[global_i] = TopicInfo(
-                        label=label, score=_round6(score), keywords=keywords
-                    )
+                    bertopic_map[global_i] = _kategori_dari_keywords(keywords)
             except Exception as e:
                 print(f"[WARN] BERTopic inference error: {e}")
 
@@ -744,7 +766,7 @@ def _infer_topic_per_paragraf(texts: List[str]) -> List[TopicInfo]:
         rule_match = rule_results[i]
         if rule_match is not None:
             nama, skor = rule_match
-            final.append(TopicInfo(label=nama, score=skor, keywords=[nama]))
+            final.append(_topic_kategori(nama, skor))
         elif i in bertopic_map:
             final.append(bertopic_map[i])
         else:

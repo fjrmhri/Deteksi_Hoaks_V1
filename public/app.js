@@ -3,108 +3,22 @@ const API_TIMEOUT_MS = 25000;
 const CONFIDENCE_CUTOFF = 0.65;
 const DETAIL_TEXT_MAX_LEN = 190;
 
-const ID_STOPWORDS = new Set([
-  "yang",
-  "dan",
-  "di",
-  "ke",
-  "dari",
-  "untuk",
-  "dengan",
-  "pada",
-  "adalah",
-  "itu",
-  "ini",
-  "tersebut",
-  "atau",
-  "karena",
-  "agar",
-  "juga",
-  "dalam",
-  "sebagai",
-  "oleh",
-  "bahwa",
-  "namun",
-  "tetapi",
-  "saat",
-  "ketika",
-  "setelah",
-  "sebelum",
-  "tanpa",
-  "sudah",
-  "belum",
-  "masih",
-  "akan",
-  "bisa",
-  "dapat",
-  "harus",
-  "lebih",
-  "kurang",
-  "hanya",
-  "hingga",
-  "sampai",
-  "jadi",
-  "yakni",
-  "yaitu",
-  "ialah",
-  "para",
-  "kami",
-  "kita",
-  "saya",
-  "aku",
-  "anda",
-  "mereka",
-  "dia",
-  "ia",
-  "maka",
-  "pun",
-  "lah",
-  "kah",
-  "nya",
-  "sebuah",
-  "seorang",
-  "beberapa",
-  "banyak",
-  "semua",
-  "tiap",
-  "setiap",
-  "antara",
-  "tentang",
-  "dalamnya",
-  "atas",
-  "bawah",
-  "secara",
-  "langsung",
-  "tidak",
-  "bukan",
-  "ya",
-  "iya",
-  "nah",
-  "si",
-  "sang",
-  "sehingga",
-  "supaya",
-  "serta",
-  "lagi",
-  "pula",
-  "telah",
-  "sedang",
-  "menjadi",
-  "terjadi",
-  "terhadap",
-  "menurut",
-  "seperti",
-  "bagi",
-  "guna",
-  "demi",
-  "apa",
-  "siapa",
-  "mana",
-  "kapan",
-  "mengapa",
-  "bagaimana",
-  "dll",
-  "dsb",
+const TOPIC_CATEGORY_LABELS = new Set([
+  "Bencana & Cuaca",
+  "Ekonomi & Bisnis",
+  "Hiburan & Gaya Hidup",
+  "Internasional",
+  "Keamanan & Pertahanan",
+  "Kesehatan",
+  "Kriminal & Hukum",
+  "Lingkungan & Energi",
+  "Nasional & Pemerintahan",
+  "Olahraga",
+  "Pendidikan",
+  "Politik",
+  "Teknologi & Sains",
+  "Topik Umum",
+  "Transportasi & Infrastruktur",
 ]);
 
 function normalizeApiBaseUrl(rawUrl) {
@@ -197,6 +111,13 @@ function normalizeTopicScore(score) {
 function cleanTopicLabel(rawLabel) {
   const label = String(rawLabel ?? "").trim();
   return !label || label === "-" ? null : label;
+}
+
+function normalizeTopicCategoryLabel(rawLabel) {
+  const label = cleanTopicLabel(rawLabel);
+  if (!label) return null;
+  if (label === "topik_umum") return "Topik Umum";
+  return TOPIC_CATEGORY_LABELS.has(label) ? label : null;
 }
 
 function normalizeNewlines(text) {
@@ -334,38 +255,14 @@ function extractGlobalTopic(payload) {
   return { label: null, score: null };
 }
 
-function inferTopicLocal(paragraphText) {
-  const raw = String(paragraphText || "").toLowerCase();
-  if (!raw.trim()) return { label: null, score: null };
-  const cleaned = raw
-    .replace(/[^a-z0-9\s]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  if (!cleaned) return { label: null, score: null };
-  const tokens = cleaned
-    .split(" ")
-    .map((t) => t.trim())
-    .filter((t) => t.length > 2 && !ID_STOPWORDS.has(t));
-  if (tokens.length === 0) return { label: null, score: null };
-  const freq = new Map();
-  tokens.forEach((t) => freq.set(t, (freq.get(t) || 0) + 1));
-  const ranked = Array.from(freq.entries()).sort(
-    (a, b) => b[1] - a[1] || a[0].localeCompare(b[0]),
-  );
-  if (ranked.length === 0) return { label: null, score: null };
-  const top1 = ranked[0];
-  const top2 = ranked[1];
-  const label = top2 ? `${top1[0]} / ${top2[0]}` : top1[0];
-  const score = Math.max(0, Math.min(1, top1[1] / tokens.length));
-  return { label, score: Number.isFinite(score) && score > 0 ? score : null };
-}
-
-function getParagraphTopicLabel(paragraph) {
-  const backendLabel = cleanTopicLabel(paragraph?.topic?.label);
+function getParagraphTopicLabel(paragraph, payload) {
+  const backendLabel = normalizeTopicCategoryLabel(paragraph?.topic?.label);
   if (backendLabel) return backendLabel;
-
-  const localTopic = inferTopicLocal(paragraph?.text);
-  return cleanTopicLabel(localTopic.label);
+  const globalLabel = normalizeTopicCategoryLabel(
+    extractGlobalTopic(payload).label,
+  );
+  if (globalLabel) return globalLabel;
+  return "Topik Umum";
 }
 
 // ── UI state ──────────────────────────────────────────────────────
@@ -724,7 +621,7 @@ function renderOutput(payload, paragraphs, sentenceLevel, topicPerParagraph) {
     }
 
     if (topicPerParagraph) {
-      const topicLabel = getParagraphTopicLabel(paragraph);
+      const topicLabel = getParagraphTopicLabel(paragraph, payload);
       const meta = document.createElement("p");
       meta.className = "paragraph-meta";
       meta.textContent = topicLabel
