@@ -109,7 +109,7 @@ model.eval()
 
 ID2LABEL: Dict[int, str] = {0: "not_hoax", 1: "hoax"}
 
-_DEFAULT_THRESHOLD_OPTIMAL: float = 0.79
+_DEFAULT_THRESHOLD_OPTIMAL: float = 0.34
 _INFERENCE_CONFIG: Dict[str, Any] = {}
 _THRESHOLD_OPTIMAL: float = _DEFAULT_THRESHOLD_OPTIMAL
 
@@ -120,28 +120,25 @@ def _read_inference_config(cfg_path: str) -> Dict[str, Any]:
 
 
 def _load_inference_config() -> Tuple[Dict[str, Any], str]:
-    from huggingface_hub import hf_hub_download
+    local_candidates = (
+        os.path.join(_BACKEND_DIR, "inference_config.json"),
+        os.path.join(
+            os.path.dirname(_BACKEND_DIR),
+            "public",
+            "hasil",
+            "inference_config.json",
+        ),
+    )
+    for local_path in local_candidates:
+        if os.path.exists(local_path):
+            print(f"[INFO] Pakai inference_config lokal: {local_path}")
+            return _read_inference_config(local_path), local_path
 
+    from huggingface_hub import hf_hub_download
     try:
         cfg_path = hf_hub_download(MODEL_ID, "inference_config.json")
         return _read_inference_config(cfg_path), cfg_path
     except Exception as hub_error:
-        local_candidates = (
-            os.path.join(_BACKEND_DIR, "inference_config.json"),
-            os.path.join(
-                os.path.dirname(_BACKEND_DIR),
-                "public",
-                "hasil",
-                "inference_config.json",
-            ),
-        )
-        for local_path in local_candidates:
-            if os.path.exists(local_path):
-                print(
-                    "[INFO] inference_config.json Hub tidak tersedia "
-                    f"({hub_error}). Pakai lokal: {local_path}"
-                )
-                return _read_inference_config(local_path), local_path
         raise hub_error
 
 
