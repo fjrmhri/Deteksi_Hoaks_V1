@@ -109,7 +109,7 @@ model.eval()
 
 ID2LABEL: Dict[int, str] = {0: "not_hoax", 1: "hoax"}
 
-_DEFAULT_THRESHOLD_OPTIMAL: float = 0.34
+_DEFAULT_THRESHOLD_OPTIMAL: float = 0.30
 _INFERENCE_CONFIG: Dict[str, Any] = {}
 _THRESHOLD_OPTIMAL: float = _DEFAULT_THRESHOLD_OPTIMAL
 

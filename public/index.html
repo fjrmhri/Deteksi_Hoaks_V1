@@ -134,7 +134,7 @@
             <div class="arch-item">
               <div class="arch-key">Threshold Runtime</div>
               <div class="arch-val">
-                0.34 &mdash; threshold optimal aktif dari validation set
+                0.30 &mdash; threshold optimal aktif dari validation set
               </div>
             </div>
             <div class="arch-item">
@@ -143,7 +143,7 @@
             </div>
             <div class="arch-item arch-item--full">
               <div class="arch-key">Tanggal Training</div>
-              <div class="arch-val">27 April 2026 · Transformers 5.0.0</div>
+              <div class="arch-val">14 Mei 2026 · Transformers 5.0.0</div>
             </div>
           </div>
         </div>
@@ -157,12 +157,12 @@
               <div class="metric-item__header">
                 <span class="metric-item__name">Akurasi</span>
                 <span class="metric-item__val metric-item__val--green"
-                  >99.84%</span
+                  >99.67%</span
                 >
               </div>
               <p class="metric-item__desc">
                 Persentase prediksi yang benar dari seluruh data test. Nilai
-                99.84% artinya model hampir selalu memprediksi dengan tepat
+                99.67% artinya model hampir selalu memprediksi dengan tepat
                 apakah sebuah berita termasuk hoaks atau fakta.
               </p>
             </div>
@@ -171,12 +171,12 @@
               <div class="metric-item__header">
                 <span class="metric-item__name">F1-Score Hoaks</span>
                 <span class="metric-item__val metric-item__val--green"
-                  >98.85%</span
+                  >99.66%</span
                 >
               </div>
               <p class="metric-item__desc">
                 Ukuran keseimbangan antara kemampuan menemukan hoaks dan
-                ketepatan prediksinya. Nilai 98.85% menunjukkan model sangat
+                ketepatan prediksinya. Nilai 99.66% menunjukkan model sangat
                 andal dalam mendeteksi hoaks tanpa terlalu sering salah menuduh
                 berita fakta.
               </p>
@@ -186,12 +186,12 @@
               <div class="metric-item__header">
                 <span class="metric-item__name">AUC-ROC</span>
                 <span class="metric-item__val metric-item__val--green"
-                  >99.74%</span
+                  >99.98%</span
                 >
               </div>
               <p class="metric-item__desc">
                 Kemampuan model membedakan hoaks dari fakta di semua kemungkinan
-                ambang keputusan. Nilai 99.74% menandakan model sangat kuat
+                ambang keputusan. Nilai 99.98% menandakan model sangat kuat
                 dalam memisahkan kedua kelas — mendekati nilai maksimum 100%.
               </p>
             </div>
@@ -200,12 +200,12 @@
               <div class="metric-item__header">
                 <span class="metric-item__name">Presisi Hoaks</span>
                 <span class="metric-item__val metric-item__val--green"
-                  >99.44%</span
+                  >99.89%</span
                 >
               </div>
               <p class="metric-item__desc">
                 Seberapa sering prediksi "hoaks" dari model ternyata memang
-                benar hoaks. Nilai 99.44% berarti saat model menandai sebuah
+                benar hoaks. Nilai 99.89% berarti saat model menandai sebuah
                 berita sebagai hoaks, hampir pasti prediksi tersebut tepat.
               </p>
             </div>
@@ -214,12 +214,12 @@
               <div class="metric-item__header">
                 <span class="metric-item__name">Recall Hoaks</span>
                 <span class="metric-item__val metric-item__val--green"
-                  >98.27%</span
+                  >99.44%</span
                 >
               </div>
               <p class="metric-item__desc">
                 Seberapa banyak berita hoaks yang berhasil ditemukan oleh model.
-                Nilai 98.27% artinya dari 100 berita hoaks yang ada, sekitar 98
+                Nilai 99.44% artinya dari 100 berita hoaks yang ada, sekitar 99
                 di antaranya berhasil terdeteksi dan tidak lolos dari sistem.
               </p>
             </div>
@@ -228,12 +228,12 @@
               <div class="metric-item__header">
                 <span class="metric-item__name">Weighted F1 Test</span>
                 <span class="metric-item__val metric-item__val--green"
-                  >99.84%</span
+                  >99.67%</span
                 >
               </div>
               <p class="metric-item__desc">
                 Rata-rata F1 yang mempertimbangkan jumlah data tiap kelas. Nilai
-                99.84% menunjukkan performa model tetap stabil pada data test
+                99.67% menunjukkan performa model tetap stabil pada data test
                 yang tidak seimbang.
               </p>
             </div>
@@ -243,7 +243,7 @@
               <div class="metric-item__header">
                 <span class="metric-item__name">Coherence (c_v)</span>
                 <span class="metric-item__val metric-item__val--green"
-                  >0.4391</span
+                  >0.5203</span
                 >
               </div>
               <p class="metric-item__desc">
@@ -256,12 +256,13 @@
               <div class="metric-item__header">
                 <span class="metric-item__name">DBCV (sampled)</span>
                 <span class="metric-item__val metric-item__val--green"
-                  >0.6604</span
+                  >-0.0133</span
                 >
               </div>
               <p class="metric-item__desc">
                 Metrik kualitas cluster berbasis densitas untuk UMAP + HDBSCAN.
-                Nilai ini dihitung pada sampel 30.000 titik, bukan full DBCV.
+                Nilai negatif tipis menunjukkan cluster belum ideal secara
+                absolut, tetapi menjadi kandidat terbaik secara komparatif.
               </p>
             </div>
 
@@ -269,12 +270,12 @@
               <div class="metric-item__header">
                 <span class="metric-item__name">Outlier Rate BERTopic</span>
                 <span class="metric-item__val metric-item__val--green"
-                  >39.92%</span
+                  >21.90%</span
                 >
               </div>
               <p class="metric-item__desc">
                 Proporsi dokumen yang masuk label outlier HDBSCAN. Sebanyak
-                48.115 dari 120.521 dokumen tidak masuk cluster topik utama.
+                3.771 dari 17.218 dokumen tidak masuk cluster topik utama.
               </p>
             </div>
 
@@ -282,12 +283,13 @@
               <div class="metric-item__header">
                 <span class="metric-item__name">Topik Final BERTopic</span>
                 <span class="metric-item__val metric-item__val--green"
-                  >75</span
+                  >79</span
                 >
               </div>
               <p class="metric-item__desc">
-                Jumlah topik non-outlier setelah topic reduction dan merge:
-                74 topik utama ditambah 1 topik noise internal.
+                Jumlah topik non-outlier setelah evaluasi kandidat final.
+                Topic 0 adalah topik valid, sedangkan outlier direpresentasikan
+                sebagai topic -1.
               </p>
             </div>
           </div>
@@ -382,7 +384,7 @@
                     alt="ROC Curve Validation"
                     loading="lazy"
                   />
-                  <figcaption>Validation · AUC = 0.9982</figcaption>
+                  <figcaption>Validation · AUC = 0.9998</figcaption>
                 </figure>
                 <figure class="eval-figure">
                   <img
@@ -390,7 +392,7 @@
                     alt="ROC Curve Test"
                     loading="lazy"
                   />
-                  <figcaption>Test · AUC = 0.9974</figcaption>
+                  <figcaption>Test · AUC = 0.9998</figcaption>
                 </figure>
               </div>
             </div>
@@ -408,7 +410,7 @@
                   loading="lazy"
                 />
                 <figcaption>
-                  Top-15 topik yang ditemukan dari 120.521 dokumen berita
+                  Top-15 topik yang ditemukan dari 17.218 dokumen training
                 </figcaption>
               </figure>
               <figure class="eval-figure eval-figure--full">
@@ -456,7 +458,7 @@
             <div class="eval-panel" data-panel="lain">
               <p class="eval-caption">
                 Grafik kalibrasi threshold menunjukkan pemilihan threshold
-                runtime 0.34 yang menghasilkan F1-Score terbaik pada data
+                runtime 0.30 yang menghasilkan F1-Score terbaik pada data
                 validasi.
               </p>
               <figure class="eval-figure eval-figure--full">
@@ -466,7 +468,7 @@
                   loading="lazy"
                 />
                 <figcaption>
-                  Kalibrasi threshold — threshold runtime: 0.34
+                  Kalibrasi threshold — threshold runtime: 0.30
                 </figcaption>
               </figure>
             </div>
