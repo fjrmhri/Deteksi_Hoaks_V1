@@ -51,17 +51,20 @@ Backend dibangun dengan FastAPI dan dijalankan oleh Uvicorn. Dependensi utamanya
 
 Konfigurasi inferensi tambahan dibaca dari `inference_config.json`. Mekanismenya:
 
-1. backend mencoba mengambil file dari Hugging Face Hub
-2. bila gagal, backend fallback ke file lokal
-3. kandidat fallback lokal mencakup `public/hasil/inference_config.json`
+1. backend mencoba membaca `backend/inference_config.json`
+2. bila tidak tersedia, backend fallback ke `public/hasil/inference_config.json`
+3. bila file lokal tidak tersedia, backend mencoba mengambil `inference_config.json` dari Hugging Face Hub
 
 Artifact `public/hasil/inference_config.json` saat ini memuat metadata berikut:
 
 - `model_name`: `indolem/indobert-base-uncased`
 - `metric_for_best_model`: `f1`
 - `max_length`: `256`
-- `threshold_optimal`: `0.79`
+- `threshold_default`: `0.5`
+- `threshold_optimal`: `0.3`
 - `transformers_version`: `5.0.0`
+- `torch_version`: `2.10.0+cu128`
+- `training_date`: `2026-05-14`
 
 Backend juga memetakan label eksplisit ke skema:
 
@@ -140,6 +143,7 @@ Metadata respons menandai strategi ini sebagai `topic_model_used = "bertopic+rul
 - menampilkan statistik input (`Paragraf`, `Kalimat`, `Kata`)
 - menyediakan tombol `Deteksi` dan `Reset`
 - menyediakan toggle mode render `Deteksi per kalimat`
+- menyediakan toggle opsional `Tampilkan topik per paragraf`
 - menampilkan banner verdict dan hasil highlight inline
 - menampilkan panel informasi model dan artifact evaluasi statis dari `public/hasil/`
 
@@ -159,6 +163,7 @@ File ini juga memuat tab visualisasi untuk:
 - mengirim request ke backend dengan timeout
 - merender banner verdict dokumen
 - merender highlight inline per kalimat atau per paragraf
+- merender label topik per paragraf bila toggle topik aktif
 - merender rincian confidence
 - menjaga statistik input tetap sinkron saat pengguna mengetik
 
@@ -191,6 +196,7 @@ Render hasil saat ini mengikuti implementasi berikut:
   - `P(hoaks)`
   - topik global bila tersedia pada `topics_global`
 - Highlight inline dibentuk ulang di frontend dari daftar kalimat pada `payload.paragraphs[*].sentences`.
+- Jika toggle topik aktif, frontend menampilkan label topik dari `payload.paragraphs[*].topic` untuk setiap paragraf.
 - Rincian confidence menampilkan:
   - `Conf`
   - `P(hoaks)`
@@ -209,7 +215,7 @@ Perlu dicatat bahwa backend juga mengirim field `color` pada analisis kalimat, t
 
 ### Catatan tentang topik di UI
 
-Backend mengembalikan `topic` per paragraf dan `shared_topics`, tetapi UI aktif saat ini hanya menampilkan `topics_global` pada banner verdict. Toggle yang terlihat di halaman mengubah mode render highlight, bukan menyalakan tampilan topik per paragraf.
+Backend mengembalikan `topic` per paragraf, `shared_topics`, dan `topics_global`. UI aktif menampilkan `topics_global` pada banner verdict, serta dapat menampilkan label topik per paragraf ketika toggle `Tampilkan topik per paragraf` diaktifkan.
 
 ## Alur Analisis / Inferensi
 
@@ -226,6 +232,7 @@ Alur inferensi yang relevan bagi developer adalah:
 9. frontend merender:
    - verdict dokumen
    - highlight inline
+   - topik per paragraf bila toggle topik aktif
    - ringkasan jumlah kalimat/paragraf
    - rincian confidence
 
@@ -235,43 +242,61 @@ Artifact evaluasi yang tersedia di `public/hasil/` menunjukkan bahwa repository 
 
 - `public/hasil/confusion_matrix_validation.png`
 - `public/hasil/confusion_matrix_test.png`
+- `public/hasil/confusion_matrix_threshold_optimal_validation.png`
+- `public/hasil/confusion_matrix_threshold_optimal_test.png`
 - `public/hasil/roc_curve_validation.png`
 - `public/hasil/roc_curve_test.png`
 - `public/hasil/kalibrasi_threshold_validation.png`
 - `public/hasil/kurva_training.png`
 - `public/hasil/inference_config.json`
-- `public/hasil/analisis_arsitektur.txt`
+- `public/hasil/evaluasi_ctfidf_topik.csv`
 
 Ringkasan metrik yang konsisten muncul di artifact evaluasi:
 
-- validation:
-  - accuracy `0.9984`
-  - F1-hoax `0.9883`
-  - AUC `0.9994`
-- test:
-  - accuracy `0.9983`
-  - F1-hoax `0.9874`
-  - AUC `0.9992`
+- validation default/argmax:
+  - accuracy `0.995393`
+  - F1-hoax `0.995242`
+  - AUC `0.999804`
+- test default/argmax:
+  - accuracy `0.996748`
+  - F1-hoax `0.996644`
+  - AUC `0.999817`
+- test dengan threshold optimal:
+  - threshold `0.30`
+  - accuracy `0.996748`
+  - precision-hoax `0.998880`
+  - recall-hoax `0.994423`
+  - F1-hoax `0.996646`
+  - AUC `0.999817`
 
 Secara praktis, metrik tersebut menunjukkan dua hal:
 
 - classifier sangat baik dalam memisahkan berita hoaks dan non-hoaks
 - kualitas pemeringkatan probabilitas juga sangat tinggi, karena AUC mendekati `1.0`
 
-### Catatan threshold: artifact evaluasi vs konfigurasi runtime
+Ringkasan BERTopic terbaru:
 
-Repository saat ini menyimpan dua sumber informasi threshold yang perlu dibedakan:
+- strategi final outlier reduction: `reduce_probabilities`
+- jumlah topik valid non-outlier: `79`
+- jumlah outlier: `3.771` dari `17.218` dokumen (`21.90%`)
+- topik terbesar: Topic `0` dengan `2.787` dokumen (`16.19%`)
+- coherence c_v: `0.520257`
+- DBCV sampled: `-0.013278`
+- HDBSCAN relative validity: `0.21855`
+- topic exclusivity rate: `0.913889`
+- keyword coverage rata-rata: `0.069279`
+- jumlah `Topik Umum`: `3`
 
-1. **Artifact evaluasi statis**
-   `public/index.html` dan `public/hasil/analisis_arsitektur.txt` mendokumentasikan threshold kalibrasi `0.62` pada validation set.
+DBCV masih negatif tipis, sehingga struktur density clustering belum ideal secara absolut. Namun, kandidat final dipilih karena menjadi kompromi terbaik dibanding alternatif lain: outlier tidak dipaksa menjadi `0%`, coherence paling tinggi, DBCV paling mendekati nol, dan distribusi topik masih terkendali.
 
-2. **Konfigurasi inferensi aktif**
-   `public/hasil/inference_config.json`, yang memang dibaca backend saat startup jika tersedia, saat ini memuat `threshold_optimal = 0.79`.
+### Catatan threshold
 
-Konsekuensinya, README ini membedakan antara:
+Repository saat ini memakai threshold yang sudah sinkron antara artifact evaluasi, panel publik, dan konfigurasi runtime:
 
-- threshold yang ditampilkan oleh panel evaluasi statis
-- threshold yang benar-benar dipakai backend runtime melalui `meta.threshold_used`
+- `threshold_default = 0.5`
+- `threshold_optimal = 0.3`
+- threshold optimal dipilih berdasarkan F1-score pada validation set
+- backend melaporkan threshold runtime melalui `meta.threshold_used`
 
 Alasan teknis dari pola ini tetap sama: threshold dipakai untuk mengonversi probabilitas ke label akhir, dan penyimpanannya di file konfigurasi membuat penyesuaian threshold bisa dilakukan tanpa mengubah logika inti inferensi.
 
@@ -287,10 +312,10 @@ Analisis topik di repository ini dapat diverifikasi dari:
 
 `public/hasil/evaluasi_ctfidf_topik.csv` berisi:
 
-- `750` baris
+- `790` baris
 - `9` kolom
-- `75` topik unik
-- `16` kategori unik
+- `79` topik unik
+- `17` kategori unik
 - `10` kata berperingkat untuk setiap topik
 
 Kolom yang paling relevan untuk interpretasi adalah:
@@ -312,38 +337,39 @@ Di file ini, `Skor_cTFIDF` adalah dasar utama untuk membaca kata yang paling mew
 Beberapa topik dengan sinyal kata yang sangat jelas antara lain:
 
 - `Kesehatan`
-  - Topik 2: `corona`, `virus`, `virus corona`, `covid`, `positif`
-  - Topik 12: `kesehatan`, `sehat`, `dokter`, `bpjs`, `rumah sakit`
+  - Topik 17: `vaksin`, `virus`, `covid`, `corona`, `virus corona`
 - `Kriminal & Hukum`
-  - Topik 15: `polisi`, `hakim`, `penjara`, `ditangkap`, `jaksa`
+  - Topik 7: `hakim`, `pengadilan`, `kasus`, `perkara`, `suap`
 - `Pendidikan`
-  - Topik 19: `sekolah`, `pelajar`, `mahasiswa`, `siswa`, `guru`
+  - Topik 23: `sekolah`, `mahasiswa`, `siswa`, `kampus`, `sekolah rakyat`
 - `Ekonomi & Bisnis`
-  - Topik 54: `saham`, `investasi`, `ihsg`, `indeks`, `harga`
+  - Topik 15: `tarif`, `trump`, `impor`, `persen`, `amerika`
 - `Transportasi & Infrastruktur`
-  - Topik 38: `kereta`, `kereta api`, `api`, `metro`, `stasiun`
+  - Topik 3: `kendaraan`, `lalu lintas`, `lintas`, `arus`, `tol`
 - `Internasional`
-  - Topik 31: `rusia`, `ukraina`, `eropa`, `italia`, `spanyol`
+  - Topik 10: `israel`, `palestina`, `gaza`, `serangan`, `hamas`
 - `Keamanan & Pertahanan`
-  - Topik 53: `perang`, `militer`, `tentara`, `prajurit`, `pasukan`
+  - Topik 28: `nuklir`, `tni`, `angkatan`, `serangan`, `prajurit`
 - `Bencana & Cuaca`
-  - Topik 14: `banjir`, `gempa`, `hujan`, `sungai`, `jembatan`
+  - Topik 1: `gempa`, `banjir`, `hujan`, `tsunami`, `wilayah`
+- `Klaim & Pemeriksaan Fakta`
+  - Topik 6: `akun`, `facebook`, `akun facebook`, `unggahan`, `tautan`
 
 Pada level kategori, agregasi `Skor_cTFIDF` menunjukkan penanda yang kuat, misalnya:
 
 - `Kesehatan`: `kesehatan`, `pasien`, `kanker`, `lockdown`
-- `Ekonomi & Bisnis`: `harga`, `pasar`, `impor`, `gaji`, `rupiah`
+- `Ekonomi & Bisnis`: `tarif`, `impor`, `harga`, `pasar`, `rupiah`
 - `Pendidikan`: `sekolah`, `pelajar`, `mahasiswa`, `siswa`, `guru`
-- `Kriminal & Hukum`: `tersangka`, `polisi`, `hakim`, `seksual`
+- `Kriminal & Hukum`: `hakim`, `pengadilan`, `kasus`, `suap`
 - `Transportasi & Infrastruktur`: `kereta`, `pesawat`, `bandara`, `kapal`
 
 ### Kata pembeda antar kategori
 
 File cTFIDF menunjukkan pemisahan topik yang cukup kuat:
 
-- terdapat `658` kata/frasa unik
-- `579` kata (`87.99%`) hanya muncul pada satu topik
-- `606` kata (`92.10%`) hanya muncul pada satu kategori
+- terdapat `720` kata/frasa unik
+- `658` kata (`91.39%`) hanya muncul pada satu topik
+- `681` kata (`94.58%`) hanya muncul pada satu kategori
 
 Artinya, mayoritas token pada file ini memang bersifat diskriminatif. Kata seperti `sekolah`, `mahasiswa`, `saham`, `kereta`, `polisi`, `rusia`, dan `militer` membedakan kategori karena:
 
@@ -353,7 +379,6 @@ Artinya, mayoritas token pada file ini memang bersifat diskriminatif. Kata seper
 Sebaliknya, beberapa kata overlap antar topik/kategori sehingga daya pembedanya lebih lemah, misalnya:
 
 - `harga` muncul pada `8` topik dan `3` kategori
-- `licitud` muncul pada `4` topik dan `3` kategori
 - `alat` muncul pada `3` topik dan `3` kategori
 - `covid` muncul pada `3` topik dan `2` kategori
 - `pelaku` muncul pada `3` topik dan `2` kategori
@@ -364,19 +389,20 @@ Kata overlap semacam ini masih informatif, tetapi tidak sekuat kata yang hanya m
 
 Coverage keyword tertinggi muncul pada topik-topik berikut:
 
-- Topik 15 `Kriminal & Hukum`: `9/57`
-- Topik 14 `Bencana & Cuaca`: `6/49`
-- Topik 19 `Pendidikan`: `7/64`
-- Topik 54 `Ekonomi & Bisnis`: `7/80`
-- Topik 31 `Internasional`: `7/81`
+- Topik 5 `Agama & Sosial`: `8/16`
+- Topik 20 `Agama & Sosial`: `5/16`
+- Topik 6 `Klaim & Pemeriksaan Fakta`: `4/14`
+- Topik 1 `Bencana & Cuaca`: `13/54`
+- Topik 28 `Keamanan & Pertahanan`: `12/60`
 
 Temuan penting lain:
 
-- kategori `Topik Umum` memiliki `29` topik dan seluruhnya tidak memiliki keyword hit (`Coverage` nol)
-- `Topik Noise (Topic 0)` juga tidak memiliki keyword hit
-- beberapa token tampak artefaktual atau kurang interpretatif, misalnya `spares`, `licitud`, `ndiricis`, `covid covid`, `bukan bukan`
+- kategori `Topik Umum` turun menjadi `3` topik
+- `76` dari `79` topik memiliki keyword hit pada kamus kategori
+- Topic `0` adalah topik valid, sedangkan outlier BERTopic direpresentasikan sebagai topic `-1`
+- artefak seperti `ditampilkan`, `breaking`, `traduction`, `traduit`, `sic`, `turnbackhoax`, dan `mafindo` sudah tidak mendominasi top words
 
-Secara praktis, ini berarti hasil cTFIDF sangat berguna untuk membaca topik yang tematik dan terstruktur, tetapi tetap perlu kehati-hatian pada topik umum/noise karena kosakatanya lebih lemah atau kurang stabil.
+Secara praktis, ini berarti hasil cTFIDF sangat berguna untuk membaca topik yang tematik dan terstruktur, tetapi tetap perlu kehati-hatian pada `Topik Umum` dan outlier `-1` karena kosakatanya dapat lebih lemah atau kurang stabil.
 
 ## Alasan Teknis / Keputusan Desain
 
@@ -466,6 +492,6 @@ Implementasi aktif repository ini adalah sistem inference hoaks yang memadukan:
 - topik hibrida rule-based + BERTopic
 - frontend statis yang menampilkan highlight dan confidence secara langsung
 
-Artifact evaluasi di `public/hasil/` menunjukkan performa klasifikasi yang sangat tinggi pada validation dan test set. Sementara itu, file cTFIDF memperlihatkan bahwa mayoritas kata topik bersifat cukup diskriminatif, walaupun kategori `Topik Umum` dan `Topik Noise` tetap perlu dibaca lebih hati-hati karena coverage keyword-nya lemah.
+Artifact evaluasi di `public/hasil/` menunjukkan performa klasifikasi yang sangat tinggi pada validation dan test set. Sementara itu, file cTFIDF memperlihatkan bahwa mayoritas kata topik bersifat cukup diskriminatif, `Topik Umum` sudah jauh berkurang, dan outlier BERTopic tetap diperlakukan sebagai topic `-1`.
 
 Dengan demikian, repository ini tidak hanya menyimpan model inference, tetapi juga menyimpan jejak evaluasi, visualisasi, dan analisis topik yang cukup lengkap untuk dipahami dari sisi implementasi maupun interpretasi hasil.
