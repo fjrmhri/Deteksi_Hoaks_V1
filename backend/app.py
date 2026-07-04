@@ -1,5 +1,5 @@
 """
-Indo Hoax Detector API — v3.3.1
+Indo Hoax Detector API — v3.3.2
 
 [FIX-RC1] v3.2.0: Hapus dual inference, gunakan agregasi kalimat.
 [FIX-RC2] v3.3.0: Tambah _aggregate_verdict dengan tie-breaking → hoaks.
@@ -17,6 +17,13 @@ Indo Hoax Detector API — v3.3.1
   p_hoax_doc → selalu mean seluruh kalimat (representatif & informatif).
 [FIX-PC1] v3.3.0: Perluas PETA_KATEGORI — tambah sinonim, negara, militer,
     keamanan, dan variasi bahasa Indonesia.
+[FIX-PC2] v3.3.2: Sinkronisasi PETA_KATEGORI dengan KATEGORI_TAMBAHAN_BERTOPIC
+    (notebook Cell 31). Sebelumnya notebook mengevaluasi topik BERTopic
+    dengan kategori tambahan ("Agama & Sosial", "Klaim & Pemeriksaan Fakta",
+    plus kata kunci tambahan di kategori lain) yang tidak ada di app.py,
+    sehingga topik terkait jatuh ke fallback "Topik Umum" saat runtime
+    walau di notebook sudah terklasifikasi dengan benar. Fix: tambahkan
+    2 kategori baru + kata kunci tambahan ke kategori yang sudah ada.
 """
 
 import json
@@ -181,6 +188,7 @@ PETA_KATEGORI: List[Tuple[str, set]] = [
         "tipikor", "suap", "gratifikasi", "pencucian", "pemalsuan",
         "penganiayaan", "pencurian", "perampokan", "narkoba", "narkotika",
         "pelecehan", "pemerkosaan", "kejahatan", "pelaku", "korban kriminal",
+        "tewas", "kerangka", "seksual",
     }),
     ("Politik", {
         "pemilu", "pilkada", "dpr", "partai", "kampanye", "bawaslu", "kpu",
@@ -194,6 +202,7 @@ PETA_KATEGORI: List[Tuple[str, set]] = [
         "referendum", "demokrasi", "oligarki", "populisme", "nasionalisme",
         "pkb", "ppp", "pan", "nasdem", "hanura", "perindo", "psi",
         "pemilih", "suara rakyat", "kebijakan publik", "anggaran negara",
+        "anies", "gibran", "pramono", "megawati",
     }),
     ("Nasional & Pemerintahan", {
         "kementerian", "menteri", "kebijakan", "asn", "pns", "pemerintah",
@@ -224,6 +233,8 @@ PETA_KATEGORI: List[Tuple[str, set]] = [
         "akuisisi", "ipo", "go public", "e-commerce", "marketplace",
         "fintech", "kripto", "bitcoin", "blockchain", "digital economy",
         "harga bahan pokok", "sembako", "beras", "minyak goreng", "bbm",
+        "uang", "triliun", "juta", "transfer", "bni", "dana", "donasi",
+        "taspen", "lowongan", "karyawan",
     }),
     ("Kesehatan", {
         "kesehatan", "penyakit", "dokter", "virus", "vaksin",
@@ -239,6 +250,7 @@ PETA_KATEGORI: List[Tuple[str, set]] = [
         "booster", "dosis", "suntik", "vaksinasi", "pfizer", "sinovac",
         "herbal", "jamu", "suplemen", "vitamin", "nutrisi", "gizi",
         "stunting", "gizi buruk", "obesitas", "kesehatan jiwa",
+        "ppds", "masker", "sanitizer", "rokok", "vape", "bergizi", "daging",
     }),
     ("Teknologi & Sains", {
         "teknologi", "internet", "aplikasi", "digital", "siber", "hacker",
@@ -254,6 +266,8 @@ PETA_KATEGORI: List[Tuple[str, set]] = [
         "komputasi", "prosesor", "chip", "semikonduktor",
         "drone", "luar angkasa", "roket", "wahana", "lapan", "brin",
         "riset", "penelitian", "jurnal", "ilmiah", "laboratorium",
+        "iphone", "apple", "telkom", "telkomsel", "sim", "ponsel",
+        "samsung", "technology",
     }),
     ("Bencana & Cuaca", {
         "gempa", "banjir", "cuaca", "bmkg", "tsunami", "longsor", "erupsi",
@@ -266,6 +280,7 @@ PETA_KATEGORI: List[Tuple[str, set]] = [
         "skala richter", "peringatan dini", "sirine", "tsunami warning",
         "pengungsian", "shelter", "posko", "bantuan bencana",
         "cuaca ekstrem", "el nino", "la nina", "perubahan iklim",
+        "terbakar", "api", "tabung", "pohon", "tumbang",
     }),
     ("Olahraga", {
         "olahraga", "sepakbola", "futsal", "basket", "bulutangkis", "atlet",
@@ -279,6 +294,8 @@ PETA_KATEGORI: List[Tuple[str, set]] = [
         "skor", "klasemen", "degradasi", "promosi", "transfer pemain",
         "sprint", "maraton", "lari", "renang", "senam", "tinju", "mma",
         "e-sports", "gaming kompetitif", "esports",
+        "megawati", "sparks", "pink", "spiders", "liverpool", "city",
+        "manchester", "arsenal", "motogp", "marquez", "bagnaia",
     }),
     ("Keamanan & Pertahanan", {
         "militer", "tni", "angkatan darat", "angkatan laut", "angkatan udara",
@@ -313,6 +330,7 @@ PETA_KATEGORI: List[Tuple[str, set]] = [
         "pengungsi", "imigran", "asylum", "deportasi",
         "hak asasi manusia", "ham internasional", "amnesty international",
         "mata-mata", "espionase", "perang proxy", "perang dagang",
+        "yoon", "suk", "yeol", "korea", "saudi", "arab",
     }),
     ("Pendidikan", {
         "sekolah", "guru", "siswa", "mahasiswa", "kampus", "universitas",
@@ -344,6 +362,7 @@ PETA_KATEGORI: List[Tuple[str, set]] = [
         "kecelakaan lalu lintas", "kemacetan", "tilang",
         "sim", "stnk", "kir", "emisi kendaraan",
         "bbm", "spbu", "subsidi bbm", "pertamax", "pertalite",
+        "sepeda", "motor", "bersepeda",
     }),
     ("Lingkungan & Energi", {
         "lingkungan", "energi", "listrik", "minyak", "gas", "emisi",
@@ -362,6 +381,7 @@ PETA_KATEGORI: List[Tuple[str, set]] = [
         "konservasi", "satwa liar", "biodiversitas", "ekosistem",
         "mangrove", "terumbu karang", "laut bersih",
         "tambang nikel", "tambang emas", "tambang batu bara",
+        "ular", "serangga", "penanaman",
     }),
     ("Hiburan & Gaya Hidup", {
         "artis", "film", "musik", "konser", "selebritas", "bioskop", "drama",
@@ -377,6 +397,19 @@ PETA_KATEGORI: List[Tuple[str, set]] = [
         "selebgram", "youtuber", "content creator", "buzzer",
         "gosip", "scandal", "perceraian", "pernikahan seleb",
         "award", "festival film", "box office",
+        "tmii", "taman", "libur", "tradisi", "sirkus", "circus",
+    }),
+    # [FIX-PC2] Kategori baru dari KATEGORI_TAMBAHAN_BERTOPIC (notebook Cell 31),
+    # sebelumnya hanya ada di notebook dan tidak tersinkron ke backend.
+    ("Agama & Sosial", {
+        "muslim", "islam", "masjid", "allah", "umat", "halal", "salat",
+        "arab", "saudi", "puasa", "ibadah", "zakat", "gereja", "katedral",
+        "paskah", "kristen",
+    }),
+    ("Klaim & Pemeriksaan Fakta", {
+        "hoax", "klaim", "narasi", "video", "gambar", "unggahan", "akun",
+        "facebook", "whatsapp", "tautan", "otp", "phishing", "cek fakta",
+        "klarifikasi",
     }),
 ]
 
@@ -453,7 +486,7 @@ def _get_bertopic_components() -> Tuple[Optional[Any], Optional[Any]]:
 # FastAPI
 # =========================
 
-app = FastAPI(title="Indo Hoax Detector API", version="3.3.1")
+app = FastAPI(title="Indo Hoax Detector API", version="3.3.2")
 
 app.add_middleware(
     CORSMiddleware,
@@ -875,7 +908,7 @@ def _aggregate_verdict(
 def read_root():
     return {
         "message": "Indo Hoax Detector API is running.",
-        "version": "3.3.1",
+        "version": "3.3.2",
         "model_id": MODEL_ID,
         "id2label": ID2LABEL,
         "threshold_optimal": _THRESHOLD_OPTIMAL,
