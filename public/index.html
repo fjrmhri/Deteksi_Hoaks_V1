@@ -134,7 +134,7 @@
             <div class="arch-item">
               <div class="arch-key">Threshold Runtime</div>
               <div class="arch-val">
-                0.30 &mdash; threshold optimal aktif dari validation set
+                0.47 &mdash; threshold optimal aktif dari validation set
               </div>
             </div>
             <div class="arch-item">
@@ -143,7 +143,9 @@
             </div>
             <div class="arch-item arch-item--full">
               <div class="arch-key">Tanggal Training</div>
-              <div class="arch-val">14 Mei 2026 · Transformers 5.0.0</div>
+              <div class="arch-val">
+                03 Juli 2026 · Transformers 5.12.1 · Torch 2.11.0+cu128
+              </div>
             </div>
           </div>
         </div>
@@ -282,13 +284,11 @@
             <div class="metric-item">
               <div class="metric-item__header">
                 <span class="metric-item__name">Topik Final BERTopic</span>
-                <span class="metric-item__val metric-item__val--green"
-                  >79</span
-                >
+                <span class="metric-item__val metric-item__val--green">79</span>
               </div>
               <p class="metric-item__desc">
-                Jumlah topik non-outlier setelah evaluasi kandidat final.
-                Topic 0 adalah topik valid, sedangkan outlier direpresentasikan
+                Jumlah topik non-outlier setelah evaluasi kandidat final. Topic
+                0 adalah topik valid, sedangkan outlier direpresentasikan
                 sebagai topic -1.
               </p>
             </div>
@@ -458,7 +458,7 @@
             <div class="eval-panel" data-panel="lain">
               <p class="eval-caption">
                 Grafik kalibrasi threshold menunjukkan pemilihan threshold
-                runtime 0.30 yang menghasilkan F1-Score terbaik pada data
+                runtime 0.47 yang menghasilkan F1-Score terbaik pada data
                 validasi.
               </p>
               <figure class="eval-figure eval-figure--full">
@@ -468,7 +468,7 @@
                   loading="lazy"
                 />
                 <figcaption>
-                  Kalibrasi threshold — threshold runtime: 0.30
+                  Kalibrasi threshold — threshold runtime: 0.47
                 </figcaption>
               </figure>
             </div>
