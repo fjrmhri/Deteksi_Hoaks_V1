@@ -1,29 +1,10 @@
 """
-Indo Hoax Detector API — v3.3.2
+Backend FastAPI untuk Indo Hoax Detector.
 
-[FIX-RC1] v3.2.0: Hapus dual inference, gunakan agregasi kalimat.
-[FIX-RC2] v3.3.0: Tambah _aggregate_verdict dengan tie-breaking → hoaks.
-[FIX-RC3] v3.3.1: Perbaiki bias Rule-1 di _aggregate_verdict:
-  v3.3.0 Rule-1 — max(P_hoaks) >= THRESH_HIGH (0.80) → auto hoaks.
-  Akibat: 6 kalimat fakta + 1 kalimat hoaks (P=0.93) → verdict HOAKS (SALAH).
-  Rule-1 terlalu bias ke 1 kalimat ekstrem tanpa memperhitungkan mayoritas.
-  Fix: Hapus Rule-1. Gunakan murni majority vote dengan tie-breaking → hoaks.
-  Logika akhir:
-    - hoax_count >= not_hoax_count AND hoax_count > 0 → hoaks (tie → hoaks)
-    - Sisanya → fakta
-  Confidence dari sisi yang menang:
-    - Hoaks → mean P(hoaks) kalimat berlabel hoaks
-    - Fakta → mean P(fakta) kalimat berlabel fakta
-  p_hoax_doc → selalu mean seluruh kalimat (representatif & informatif).
-[FIX-PC1] v3.3.0: Perluas PETA_KATEGORI — tambah sinonim, negara, militer,
-    keamanan, dan variasi bahasa Indonesia.
-[FIX-PC2] v3.3.2: Sinkronisasi PETA_KATEGORI dengan KATEGORI_TAMBAHAN_BERTOPIC
-    (notebook Cell 31). Sebelumnya notebook mengevaluasi topik BERTopic
-    dengan kategori tambahan ("Agama & Sosial", "Klaim & Pemeriksaan Fakta",
-    plus kata kunci tambahan di kategori lain) yang tidak ada di app.py,
-    sehingga topik terkait jatuh ke fallback "Topik Umum" saat runtime
-    walau di notebook sudah terklasifikasi dengan benar. Fix: tambahkan
-    2 kategori baru + kata kunci tambahan ke kategori yang sudah ada.
+Modul ini memuat model klasifikasi IndoBERT dan model topik BERTopic,
+lalu menyediakan endpoint REST untuk prediksi hoaks/fakta pada teks
+tunggal, batch teks, maupun analisis multi-paragraf (segmentasi kalimat,
+klasifikasi per kalimat, agregasi verdict dokumen, dan ekstraksi topik).
 """
 
 import json
@@ -41,10 +22,6 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
-
-# =========================
-# Konfigurasi
-# =========================
 
 MODEL_ID        = os.getenv("MODEL_ID", "fjrmhri/deteksi_hoaks_indobert")
 SUBFOLDER       = os.getenv("MODEL_SUBFOLDER", "") or None
@@ -88,10 +65,6 @@ print(f"THRESH_KALIMAT_PENDEK     : {THRESH_KALIMAT_PENDEK} (< {MIN_KATA_KALIMAT
 print(f"BERTopic embed model      : {BERTOPIC_EMBED_MODEL_ID}")
 print("======================================")
 
-
-# =========================
-# Load IndoBERT (singleton)
-# =========================
 
 def _load_model_artifacts():
     kw = {}
@@ -171,10 +144,6 @@ try:
 except Exception as _e:
     print(f"[INFO] inference_config.json tidak tersedia ({_e}). Pakai {_THRESHOLD_OPTIMAL}")
 
-
-# =========================
-# [FIX-PC1] PETA_KATEGORI — diperluas dengan sinonim & konteks
-# =========================
 
 PETA_KATEGORI: List[Tuple[str, set]] = [
     ("Kriminal & Hukum", {
@@ -399,8 +368,6 @@ PETA_KATEGORI: List[Tuple[str, set]] = [
         "award", "festival film", "box office",
         "tmii", "taman", "libur", "tradisi", "sirkus", "circus",
     }),
-    # [FIX-PC2] Kategori baru dari KATEGORI_TAMBAHAN_BERTOPIC (notebook Cell 31),
-    # sebelumnya hanya ada di notebook dan tidak tersinkron ke backend.
     ("Agama & Sosial", {
         "muslim", "islam", "masjid", "allah", "umat", "halal", "salat",
         "arab", "saudi", "puasa", "ibadah", "zakat", "gereja", "katedral",
@@ -441,10 +408,6 @@ def _kategorisasi_teks(teks: str) -> Optional[Tuple[str, float]]:
     return best_nama, _round6(best_skor)
 
 
-# =========================
-# BERTopic + SentenceTransformer Singleton
-# =========================
-
 _bertopic_model = None
 _st_embedder    = None
 _bertopic_lock  = Lock()
@@ -482,10 +445,6 @@ def _get_bertopic_components() -> Tuple[Optional[Any], Optional[Any]]:
         return None, None
 
 
-# =========================
-# FastAPI
-# =========================
-
 app = FastAPI(title="Indo Hoax Detector API", version="3.3.2")
 
 app.add_middleware(
@@ -496,10 +455,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
-# =========================
-# Schemas
-# =========================
 
 class PredictRequest(BaseModel):
     text: str
@@ -581,10 +536,6 @@ class AnalyzeResponse(BaseModel):
     meta: AnalyzeMeta
 
 
-# =========================
-# Util
-# =========================
-
 PARAGRAPH_SPLIT_RE = re.compile(r"(?:\r?\n){2,}")
 SENTENCE_SPLIT_RE  = re.compile(r'[^.!?]+(?:[.!?]+(?:[")\]]+)?)|[^.!?]+$')
 WS_RE              = re.compile(r"\s+")
@@ -635,10 +586,6 @@ def _normalize_unit_text(text: str) -> str:
 def _prepare_texts(texts: List[str]) -> List[str]:
     return [_normalize_unit_text(t) if t else "[EMPTY]" for t in texts]
 
-
-# =========================
-# IndoBERT inference
-# =========================
 
 def _predict_proba(texts: List[str], batch_size: int = SENTENCE_BATCH_SIZE) -> List[Dict[str, float]]:
     if not texts:
@@ -757,10 +704,6 @@ def _to_canonical_label(p_hoax: float, teks: Optional[str] = None) -> str:
     return "hoax" if p_hoax >= thresh else "not_hoax"
 
 
-# =========================
-# BERTopic inference
-# =========================
-
 def _st_encode(texts: List[str], embedder) -> np.ndarray:
     return embedder.encode(
         texts, batch_size=BERTOPIC_EMBED_BATCH,
@@ -836,45 +779,9 @@ def _maybe_log(sample_info: Dict):
     print("[HOAX_LOG]", sample_info)
 
 
-# =========================
-# [FIX-RC2] Fungsi agregasi verdict dari kalimat
-# =========================
-
 def _aggregate_verdict(
     all_sentences: List[SentenceAnalysis],
 ) -> Tuple[str, float, float]:
-    """
-    Kembalikan (doc_label, p_hoax_doc, doc_conf).
-
-    [FIX-RC3] Logika final — murni majority vote:
-      Hoaks menang jika hoax_count >= not_hoax_count AND hoax_count > 0.
-      Tie (sama banyak) → hoaks (lebih aman untuk sistem deteksi).
-      Selain itu → fakta.
-
-    p_hoax_doc:
-      Selalu = mean P(hoaks) seluruh kalimat — representatif & informatif.
-      Ditampilkan frontend sebagai "P(hoaks): XX%".
-
-    doc_conf:
-      Confidence dari sisi yang menang, bukan dari mean keseluruhan:
-      - Hoaks → mean P(hoaks) kalimat berlabel hoaks
-      - Fakta → mean P(fakta) kalimat berlabel fakta
-
-    Contoh verifikasi:
-      6 fakta (P≈0.0002) + 1 hoaks (P=0.9346):
-        hoax_count=1 < not_hoax_count=6 → FAKTA
-        p_hoax_doc = 0.1352, doc_conf = 0.9998 (P(fakta) rata-rata) ✓
-
-      1 hoaks (P=0.9346) + 1 fakta (P≈0.0002):
-        hoax_count=1 == not_hoax_count=1 → tie → HOAKS
-        p_hoax_doc = 0.9346, doc_conf = 0.9346 ✓
-
-      3 hoaks + 4 fakta:
-        hoax_count=3 < not_hoax_count=4 → FAKTA ✓
-
-      3 hoaks + 3 fakta:
-        tie → HOAKS ✓
-    """
     if not all_sentences:
         return "not_hoax", 0.0, 0.0
 
@@ -887,22 +794,16 @@ def _aggregate_verdict(
     )
 
     if hoax_count >= not_hoax_count and hoax_count > 0:
-        # Hoaks menang atau tie → hoaks
         p_hoax_doc = float(
             sum(s.hoax_probability for s in hoax_sents) / hoax_count
         )
         return "hoax", mean_p_hoax, p_hoax_doc
 
-    # Fakta menang
     p_fakta_doc = float(
         sum(1.0 - s.hoax_probability for s in not_hoax_sents) / not_hoax_count
     ) if not_hoax_sents else 0.5
     return "not_hoax", mean_p_hoax, p_fakta_doc
 
-
-# =========================
-# Routes
-# =========================
 
 @app.get("/")
 def read_root():
@@ -979,7 +880,6 @@ def analyze(request: AnalyzeRequest):
             paragraphs=[], shared_topics=[], topics_global=None, meta=base_meta,
         )
 
-    # Step 1: split
     paragraph_texts = _split_paragraphs(original_text)
     sentence_texts: List[str] = []
     sentence_map:   List[Tuple[int, int]] = []
@@ -988,10 +888,8 @@ def analyze(request: AnalyzeRequest):
             sentence_texts.append(sentence)
             sentence_map.append((p_idx, s_idx))
 
-    # Step 2: inferensi per kalimat
     sentence_prob_list = _predict_proba(sentence_texts, batch_size=SENTENCE_BATCH_SIZE)
 
-    # Step 3: bangun SentenceAnalysis
     paragraph_sentences: List[List[SentenceAnalysis]] = [[] for _ in paragraph_texts]
     for (p_idx, s_idx), sent_text, sent_prob_dict in zip(
         sentence_map, sentence_texts, sentence_prob_list
@@ -1010,7 +908,6 @@ def analyze(request: AnalyzeRequest):
             color=_sentence_color(sent_label, sent_conf),
         ))
 
-    # Step 4: [FIX-RC2] agregasi verdict dari kalimat
     all_sentences_flat = [s for plist in paragraph_sentences for s in plist]
     hoax_sentence_count     = sum(1 for s in all_sentences_flat if s.label == "hoax")
     not_hoax_sentence_count = sum(1 for s in all_sentences_flat if s.label == "not_hoax")
@@ -1020,7 +917,6 @@ def analyze(request: AnalyzeRequest):
 
     risk_level, risk_explanation = analyze_risk(p_hoax_doc, original_text=original_text)
 
-    # Step 5: topik
     per_paragraph_topics = _infer_topic_per_paragraf(paragraph_texts)
 
     label_counts: Counter = Counter(t.label for t in per_paragraph_topics)
@@ -1030,7 +926,6 @@ def analyze(request: AnalyzeRequest):
         _FALLBACK_TOPIC,
     )
 
-    # Step 6: bangun ParagraphAnalysis
     paragraphs: List[ParagraphAnalysis] = []
     for p_idx, p_text in enumerate(paragraph_texts):
         sents  = sorted(paragraph_sentences[p_idx], key=lambda x: x.sentence_index)

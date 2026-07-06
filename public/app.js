@@ -1,15 +1,31 @@
+/**
+ * Frontend logic untuk aplikasi Deteksi Hoaks Berita.
+ *
+ * Berkas ini menangani: pemanggilan endpoint /analyze pada backend FastAPI,
+ * normalisasi label dan skor probabilitas, segmentasi teks menjadi paragraf
+ * dan kalimat di sisi klien, highlight kalimat/paragraf berdasarkan label
+ * hoaks-fakta, serta rendering ringkasan verdict dan rincian confidence
+ * ke dalam antarmuka index.html.
+ */
+
 const DEFAULT_API_BASE_URL = "https://fjrmhri-ta-final-space.hf.space";
 const API_TIMEOUT_MS = 25000;
 const CONFIDENCE_CUTOFF = 0.65;
 const DETAIL_TEXT_MAX_LEN = 190;
 
 const TOPIC_CATEGORY_LABELS = new Set([
+  // [FIX-PC3] Tambah 2 kategori yang sudah ada di PETA_KATEGORI backend
+  // ([FIX-PC2]) tapi belum masuk whitelist frontend, sehingga sebelumnya
+  // selalu ditolak oleh normalizeTopicCategoryLabel() dan fallback ke
+  // topik global.
+  "Agama & Sosial",
   "Bencana & Cuaca",
   "Ekonomi & Bisnis",
   "Hiburan & Gaya Hidup",
   "Internasional",
   "Keamanan & Pertahanan",
   "Kesehatan",
+  "Klaim & Pemeriksaan Fakta",
   "Kriminal & Hukum",
   "Lingkungan & Energi",
   "Nasional & Pemerintahan",
@@ -72,8 +88,6 @@ const outputParagraphs = document.getElementById("outputParagraphs");
 const confidenceDetails = document.getElementById("confidenceDetails");
 const confidenceSummary = document.getElementById("confidenceSummary");
 const confidenceList = document.getElementById("confidenceList");
-
-// ── Util ──────────────────────────────────────────────────────────
 
 function escapeHtml(text) {
   return String(text || "")
@@ -169,8 +183,6 @@ function normalizeParagraphBreaks(text) {
   return n.replace(/\n+/g, "\n\n");
 }
 
-// ── Label normalization ───────────────────────────────────────────
-
 function normalizeLabel(rawLabel) {
   const value = String(rawLabel || "")
     .toLowerCase()
@@ -239,8 +251,6 @@ function getSentenceFaktaProb(sentence) {
   return Math.max(0, Math.min(1, 1 - getSentenceHoaxProb(sentence)));
 }
 
-// ── Topic extraction ──────────────────────────────────────────────
-
 function extractGlobalTopic(payload) {
   const safe = payload && typeof payload === "object" ? payload : {};
   const tg = safe.topics_global;
@@ -264,8 +274,6 @@ function getParagraphTopicLabel(paragraph, payload) {
   if (globalLabel) return globalLabel;
   return "Topik Umum";
 }
-
-// ── UI state ──────────────────────────────────────────────────────
 
 function showError(message) {
   if (!errorBox) return;
@@ -309,8 +317,6 @@ function resetOutput() {
   }
 }
 
-// ── Verdict banner ────────────────────────────────────────────────
-
 function renderVerdict(payload) {
   if (!verdictBanner || !verdictIcon || !verdictLabel || !verdictConf) return;
 
@@ -342,8 +348,6 @@ function renderVerdict(payload) {
 
   verdictBanner.classList.remove("hidden");
 }
-
-// ── API call ──────────────────────────────────────────────────────
 
 async function fetchWithTimeout(url, options = {}, timeoutMs = API_TIMEOUT_MS) {
   const controller = new AbortController();
@@ -400,8 +404,6 @@ async function callAnalyzeApi(text, sentenceLevel, topicPerParagraph) {
     throw err;
   }
 }
-
-// ── Paragraph/sentence model ──────────────────────────────────────
 
 function sortByIndex(arr, key) {
   return [...(Array.isArray(arr) ? arr : [])].sort((a, b) => {
@@ -536,8 +538,6 @@ function extractParagraphs(payload, inputText) {
   return buildFallbackParagraphs(payload.paragraphs, inputText);
 }
 
-// ── Sentence highlighting ─────────────────────────────────────────
-
 function needsSoftSpace(prev, curr) {
   if (!prev || !curr) return false;
   if (/\s$/.test(prev) || /^\s/.test(curr)) return false;
@@ -569,8 +569,6 @@ function joinHighlighted(sentences) {
   }
   return html;
 }
-
-// ── Render output ─────────────────────────────────────────────────
 
 function renderOutput(payload, paragraphs, sentenceLevel, topicPerParagraph) {
   if (!outputSection || !outputParagraphs || !globalSummary) return null;
@@ -638,8 +636,6 @@ function renderOutput(payload, paragraphs, sentenceLevel, topicPerParagraph) {
   outputSection.classList.remove("hidden");
   return sm;
 }
-
-// ── Render confidence details ─────────────────────────────────────
 
 function renderConfidence(paragraphs, sentenceLevel, sm) {
   if (!confidenceDetails || !confidenceSummary || !confidenceList) return;
@@ -774,8 +770,6 @@ function renderConfidence(paragraphs, sentenceLevel, sm) {
   confidenceList.appendChild(fragment);
   confidenceDetails.classList.remove("hidden");
 }
-
-// ── Handlers ──────────────────────────────────────────────────────
 
 function handleReset() {
   if (newsText) newsText.value = "";

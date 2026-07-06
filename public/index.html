@@ -1,3 +1,11 @@
+<!--
+  Halaman utama aplikasi Deteksi Hoaks Berita.
+
+  Berisi form input teks berita, area hasil highlight per kalimat/paragraf,
+  rincian confidence, serta panel informasi arsitektur model dan visualisasi
+  evaluasi (confusion matrix, ROC, topik BERTopic, c-TF-IDF). Logika interaktif
+  ditangani oleh app.js.
+-->
 <!doctype html>
 <html lang="id">
   <head>
@@ -14,7 +22,6 @@
   </head>
   <body>
     <main class="app-container">
-      <!-- INPUT SECTION -->
       <section class="card input-section">
         <h1>Deteksi Hoaks Berita</h1>
         <p class="subtitle">
@@ -79,14 +86,11 @@
         </p>
       </section>
 
-      <!-- ERROR -->
       <section id="errorBox" class="card error-box hidden" role="alert">
         <span id="errorText"></span>
       </section>
 
-      <!-- OUTPUT -->
       <section id="outputSection" class="card output-section hidden">
-        <!-- Verdict -->
         <div id="verdictBanner" class="verdict-banner hidden">
           <div class="verdict-banner__left">
             <div id="verdictIcon" class="verdict-icon" aria-hidden="true"></div>
@@ -105,17 +109,14 @@
         <div id="outputParagraphs" class="paragraph-list"></div>
       </section>
 
-      <!-- CONFIDENCE DETAILS -->
       <details id="confidenceDetails" class="card confidence-section hidden">
         <summary id="confidenceSummary">Rincian Keyakinan</summary>
         <ul id="confidenceList" class="confidence-list"></ul>
       </details>
 
-      <!-- MODEL INFO -->
       <section class="card model-section">
         <h2>Informasi Model &amp; Evaluasi</h2>
 
-        <!-- Arsitektur -->
         <div class="model-block">
           <h3 class="model-block__heading">Arsitektur Model</h3>
           <div class="arch-grid">
@@ -150,7 +151,6 @@
           </div>
         </div>
 
-        <!-- Metrik -->
         <div class="model-block">
           <h3 class="model-block__heading">Metrik Evaluasi</h3>
           <div class="metric-list">
@@ -295,7 +295,6 @@
           </div>
         </div>
 
-        <!-- Visualisasi -->
         <div class="model-block">
           <h3 class="model-block__heading">Visualisasi Evaluasi</h3>
 
