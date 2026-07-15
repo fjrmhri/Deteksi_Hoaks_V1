@@ -586,8 +586,19 @@ class AnalyzeResponse(BaseModel):
 
 
 # ==== Inisialisasi variabel global: pola regex & topik fallback ====
+# Regex pemisah paragraf: mencocokkan 2 baris baru (newline) atau lebih secara
+# berurutan (artinya ada baris kosong di antara paragraf). "\r?" membuat pola ini
+# tetap cocok baik untuk newline gaya Unix (\n) maupun Windows (\r\n).
 PARAGRAPH_SPLIT_RE = re.compile(r"(?:\r?\n){2,}")
+# Regex pemisah kalimat, terdiri dari 2 alternatif yang dipisah "|":
+#   1) [^.!?]+(?:[.!?]+(?:[")\]]+)?)  -> rangkaian karakter apa pun SELAIN . ! ?,
+#      lalu diakhiri satu/lebih tanda baca akhir kalimat (. ! ?), dan boleh diikuti
+#      tanda kutip/kurung penutup seperti " ) ] (mis. kalimat dalam kutipan).
+#   2) [^.!?]+$                       -> jika sampai akhir string tidak ada tanda
+#      baca akhir kalimat sama sekali, sisa teks tetap diambil sebagai satu kalimat.
 SENTENCE_SPLIT_RE  = re.compile(r'[^.!?]+(?:[.!?]+(?:[")\]]+)?)|[^.!?]+$')
+# Regex untuk mendeteksi satu atau lebih karakter whitespace (spasi, tab, newline,
+# dsb.) secara berurutan; dipakai untuk merapikan teks jadi satu spasi tunggal.
 WS_RE              = re.compile(r"\s+")
 
 _FALLBACK_TOPIC = TopicInfo(label="Topik Umum", score=0.0, keywords=["topik_umum"])
@@ -731,23 +742,39 @@ def analyze_risk(p_hoax: float, original_text: Optional[str] = None) -> Tuple[st
 
 # ==== Fungsi pemecah teks menjadi paragraf ====
 def _split_paragraphs(text: str) -> List[str]:
-    raw = str(text).strip()
-    if not raw:
-        return []
+    raw = str(text).strip()  # pastikan input berupa string, buang spasi di awal/akhir
+    if not raw:               # jika teks kosong setelah dirapikan...
+        return []              # ...tidak ada paragraf sama sekali, kembalikan list kosong
+    # Pisahkan teks di setiap titik yang cocok PARAGRAPH_SPLIT_RE (>=2 newline / baris
+    # kosong), lalu buang elemen yang jadi kosong setelah di-strip (mis. baris kosong ganda)
     paragraphs = [p.strip() for p in PARAGRAPH_SPLIT_RE.split(raw) if p.strip()]
+    # --- Fallback untuk teks yang paragrafnya HANYA dipisah newline tunggal ---
+    # Jika hasil split di atas cuma menghasilkan 0 atau 1 paragraf, padahal teks
+    # masih mengandung newline, kemungkinan besar user tidak memberi baris kosong
+    # di antara paragraf (hanya Enter satu kali), sehingga PARAGRAPH_SPLIT_RE gagal
+    # mendeteksi batas paragraf dengan benar.
     if len(paragraphs) <= 1 and "\n" in raw:
+        # Coba pisah ulang berdasarkan tiap baris tunggal (satu newline = satu baris)
         line_based = [p.strip() for p in raw.splitlines() if p.strip()]
-        if len(line_based) > 1:
-            return line_based
+        if len(line_based) > 1:      # jika cara ini menghasilkan lebih dari 1 baris...
+            return line_based         # ...anggap tiap baris sebagai satu paragraf
+    # Fallback terakhir: kalau tetap tidak ada paragraf yang terbentuk (mis. teks
+    # tanpa newline sama sekali), kembalikan seluruh teks sebagai satu paragraf tunggal
     return paragraphs or [raw]
 
 
 # ==== Fungsi pemecah paragraf menjadi kalimat ====
 def _split_sentences(paragraph: str) -> List[str]:
-    normalized = _normalize_unit_text(paragraph)
-    if not normalized:
-        return []
+    normalized = _normalize_unit_text(paragraph)  # rapikan whitespace jadi satu spasi
+    if not normalized:                              # jika paragraf kosong setelah dirapikan...
+        return []                                    # ...tidak ada kalimat untuk diproses
+    # Cari semua potongan teks yang cocok SENTENCE_SPLIT_RE (kalimat yang berakhir
+    # dengan . ! ? , atau sisa teks di akhir paragraf tanpa tanda baca), lalu strip
+    # spasi di tiap kalimat hasil pemecahan
     sentences = [m.group(0).strip() for m in SENTENCE_SPLIT_RE.finditer(normalized)]
+    # Buang kalimat yang jadi kosong (mis. hasil match tak bermakna); jika ternyata
+    # tidak ada satu pun kalimat valid yang tersisa, kembalikan seluruh paragraf
+    # sebagai satu kalimat tunggal (fallback agar tidak kehilangan teks)
     return [s for s in sentences if s] or [normalized]
 
 
@@ -853,23 +880,44 @@ def _maybe_log(sample_info: Dict):
 def _aggregate_verdict(
     all_sentences: List[SentenceAnalysis],
 ) -> Tuple[str, float, float]:
-    if not all_sentences:
-        return "not_hoax", 0.0, 0.0
+    if not all_sentences:                  # jika tidak ada satu pun kalimat masuk...
+        return "not_hoax", 0.0, 0.0         # ...default aman: anggap not_hoax, skor 0
 
-    hoax_sents     = [s for s in all_sentences if s.label == "hoax"]
-    not_hoax_sents = [s for s in all_sentences if s.label == "not_hoax"]
-    hoax_count     = len(hoax_sents)
-    not_hoax_count = len(not_hoax_sents)
+    # --- Kelompokkan "suara" tiap kalimat berdasarkan label hasil klasifikasinya ---
+    hoax_sents     = [s for s in all_sentences if s.label == "hoax"]      # kalimat berlabel hoax
+    not_hoax_sents = [s for s in all_sentences if s.label == "not_hoax"]  # kalimat berlabel not_hoax
+    hoax_count     = len(hoax_sents)        # jumlah "suara" untuk hoax
+    not_hoax_count = len(not_hoax_sents)    # jumlah "suara" untuk not_hoax
+    # Rata-rata probabilitas hoax dari SEMUA kalimat (tanpa memandang labelnya),
+    # dipakai sebagai skor confidence dokumen di kedua kemungkinan verdict di bawah
     mean_p_hoax    = float(
         sum(s.hoax_probability for s in all_sentences) / len(all_sentences)
     )
 
+    # ==== MAJORITY VOTE + TIE-BREAKING ====
+    # Aturan: verdict dokumen mengikuti label yang "menang suara" di antara semua
+    # kalimatnya (mayoritas kalimat hoax -> dokumen hoax, mayoritas not_hoax -> dokumen
+    # not_hoax). Operator yang dipakai adalah ">=" (bukan ">"), sehingga saat terjadi
+    # SERI/TIE (hoax_count == not_hoax_count), keputusan tetap dijatuhkan ke "hoax".
+    # Ini kebijakan berat-sebelah yang sengaja dipilih: lebih aman menandai sesuatu
+    # sebagai hoax saat ragu-ragu (skor seimbang), daripada meloloskannya begitu saja.
+    # Guard tambahan "hoax_count > 0" mencegah verdict "hoax" keluar pada kasus
+    # degenerate di mana hoax_count dan not_hoax_count sama-sama nol.
     if hoax_count >= not_hoax_count and hoax_count > 0:
+        # Verdict dokumen = "hoax". Hitung rata-rata probabilitas hoax HANYA dari
+        # kalimat-kalimat yang berlabel hoax (bukan dari semua kalimat), supaya
+        # confidence yang dilaporkan benar-benar mencerminkan seberapa yakin model
+        # terhadap kalimat-kalimat yang dianggap hoax tersebut.
         p_hoax_doc = float(
             sum(s.hoax_probability for s in hoax_sents) / hoax_count
         )
         return "hoax", mean_p_hoax, p_hoax_doc
 
+    # Verdict dokumen = "not_hoax" (kalah suara atau tidak ada kalimat hoax sama
+    # sekali). Hitung rata-rata probabilitas "bukan hoax" (1 - hoax_probability)
+    # HANYA dari kalimat berlabel not_hoax. Jika not_hoax_sents kosong (kasus
+    # tak terduga karena seharusnya sudah tertangani cabang di atas), pakai nilai
+    # netral 0.5 sebagai fallback aman agar tidak terjadi pembagian dengan nol.
     p_fakta_doc = float(
         sum(1.0 - s.hoax_probability for s in not_hoax_sents) / not_hoax_count
     ) if not_hoax_sents else 0.5
