@@ -2,13 +2,13 @@
   Halaman utama aplikasi Deteksi Hoaks Berita.
 
   Berisi form input teks berita, area hasil highlight per kalimat/paragraf,
-  rincian confidence, serta panel informasi arsitektur model dan visualisasi
-  evaluasi (confusion matrix, ROC, topik BERTopic, c-TF-IDF). Logika interaktif
+  serta panel rincian confidence per kalimat/paragraf. Logika interaktif
   ditangani oleh app.js.
 -->
 <!doctype html>
 <html lang="id">
   <head>
+    <!-- Metadata halaman, preconnect font Google, dan pemuatan stylesheet -->
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Deteksi Hoaks Berita</title>
@@ -22,6 +22,8 @@
   </head>
   <body>
     <main class="app-container">
+      <!-- Bagian formulir input: tempat pengguna menempelkan teks berita
+           dan mengatur opsi mode deteksi sebelum menekan tombol analisis -->
       <section class="card input-section">
         <h1>Deteksi Hoaks Berita</h1>
         <p class="subtitle">
@@ -55,6 +57,7 @@
           </button>
         </div>
 
+        <!-- Toggle mode highlight: per kalimat (ON) atau per paragraf (OFF) -->
         <div class="topic-toggle-row">
           <label class="topic-toggle" for="sentenceLevelToggle">
             <input type="checkbox" id="sentenceLevelToggle" checked />
@@ -66,6 +69,7 @@
           </p>
         </div>
 
+        <!-- Toggle tampilan label topik pada tiap paragraf hasil analisis -->
         <div class="topic-toggle-row">
           <label class="topic-toggle" for="topicToggle">
             <input type="checkbox" id="topicToggle" />
@@ -86,10 +90,14 @@
         </p>
       </section>
 
+      <!-- Kotak pesan error; tersembunyi secara default, ditampilkan oleh app.js
+           saat request ke backend gagal atau input tidak valid -->
       <section id="errorBox" class="card error-box hidden" role="alert">
         <span id="errorText"></span>
       </section>
 
+      <!-- Area hasil analisis: verdict banner, ringkasan global, dan highlight
+           paragraf/kalimat. Seluruh isi di sini dirender secara dinamis oleh app.js -->
       <section id="outputSection" class="card output-section hidden">
         <div id="verdictBanner" class="verdict-banner hidden">
           <div class="verdict-banner__left">
@@ -109,395 +117,17 @@
         <div id="outputParagraphs" class="paragraph-list"></div>
       </section>
 
+      <!-- Panel rincian confidence per kalimat/paragraf (collapsible),
+           diisi secara dinamis oleh app.js setelah analisis selesai -->
       <details id="confidenceDetails" class="card confidence-section hidden">
         <summary id="confidenceSummary">Rincian Keyakinan</summary>
         <ul id="confidenceList" class="confidence-list"></ul>
       </details>
 
-      <section class="card model-section">
-        <h2>Informasi Model &amp; Evaluasi</h2>
-
-        <div class="model-block">
-          <h3 class="model-block__heading">Arsitektur Model</h3>
-          <div class="arch-grid">
-            <div class="arch-item">
-              <div class="arch-key">Model Klasifikasi</div>
-              <div class="arch-val">
-                <code>indolem/indobert-base-uncased</code>
-              </div>
-            </div>
-            <div class="arch-item">
-              <div class="arch-key">Model Topik</div>
-              <div class="arch-val">
-                BERTopic + paraphrase-multilingual-MiniLM-L12-v2
-              </div>
-            </div>
-            <div class="arch-item">
-              <div class="arch-key">Threshold Runtime</div>
-              <div class="arch-val">
-                0.47 &mdash; threshold optimal aktif dari validation set
-              </div>
-            </div>
-            <div class="arch-item">
-              <div class="arch-key">Split Data</div>
-              <div class="arch-val">Train 70% · Validation 15% · Test 15%</div>
-            </div>
-            <div class="arch-item arch-item--full">
-              <div class="arch-key">Tanggal Training</div>
-              <div class="arch-val">
-                03 Juli 2026 · Transformers 5.12.1 · Torch 2.11.0+cu128
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="model-block">
-          <h3 class="model-block__heading">Metrik Evaluasi</h3>
-          <div class="metric-list">
-            <div class="metric-group-title">IndoBERT · Test Set</div>
-            <div class="metric-item">
-              <div class="metric-item__header">
-                <span class="metric-item__name">Akurasi</span>
-                <span class="metric-item__val metric-item__val--green"
-                  >99.67%</span
-                >
-              </div>
-              <p class="metric-item__desc">
-                Persentase prediksi yang benar dari seluruh data test. Nilai
-                99.67% artinya model hampir selalu memprediksi dengan tepat
-                apakah sebuah berita termasuk hoaks atau fakta.
-              </p>
-            </div>
-
-            <div class="metric-item">
-              <div class="metric-item__header">
-                <span class="metric-item__name">F1-Score Hoaks</span>
-                <span class="metric-item__val metric-item__val--green"
-                  >99.66%</span
-                >
-              </div>
-              <p class="metric-item__desc">
-                Ukuran keseimbangan antara kemampuan menemukan hoaks dan
-                ketepatan prediksinya. Nilai 99.66% menunjukkan model sangat
-                andal dalam mendeteksi hoaks tanpa terlalu sering salah menuduh
-                berita fakta.
-              </p>
-            </div>
-
-            <div class="metric-item">
-              <div class="metric-item__header">
-                <span class="metric-item__name">AUC-ROC</span>
-                <span class="metric-item__val metric-item__val--green"
-                  >99.99%</span
-                >
-              </div>
-              <p class="metric-item__desc">
-                Kemampuan model membedakan hoaks dari fakta di semua kemungkinan
-                ambang keputusan. Nilai 99.99% menandakan model sangat kuat
-                dalam memisahkan kedua kelas — mendekati nilai maksimum 100%.
-              </p>
-            </div>
-
-            <div class="metric-item">
-              <div class="metric-item__header">
-                <span class="metric-item__name">Presisi Hoaks</span>
-                <span class="metric-item__val metric-item__val--green"
-                  >99.94%</span
-                >
-              </div>
-              <p class="metric-item__desc">
-                Seberapa sering prediksi "hoaks" dari model ternyata memang
-                benar hoaks. Nilai 99.94% berarti saat model menandai sebuah
-                berita sebagai hoaks, hampir pasti prediksi tersebut tepat.
-              </p>
-            </div>
-
-            <div class="metric-item">
-              <div class="metric-item__header">
-                <span class="metric-item__name">Recall Hoaks</span>
-                <span class="metric-item__val metric-item__val--green"
-                  >99.39%</span
-                >
-              </div>
-              <p class="metric-item__desc">
-                Seberapa banyak berita hoaks yang berhasil ditemukan oleh model.
-                Nilai 99.39% artinya dari 100 berita hoaks yang ada, sekitar 99
-                di antaranya berhasil terdeteksi dan tidak lolos dari sistem.
-              </p>
-            </div>
-
-            <div class="metric-item">
-              <div class="metric-item__header">
-                <span class="metric-item__name">Weighted F1 Test</span>
-                <span class="metric-item__val metric-item__val--green"
-                  >99.67%</span
-                >
-              </div>
-              <p class="metric-item__desc">
-                Rata-rata F1 yang mempertimbangkan jumlah data tiap kelas. Nilai
-                99.67% menunjukkan performa model tetap stabil pada data test
-                yang tidak seimbang.
-              </p>
-            </div>
-
-            <div class="metric-group-title">BERTopic · Topic Modeling</div>
-            <div class="metric-item">
-              <div class="metric-item__header">
-                <span class="metric-item__name">Coherence (c_v)</span>
-                <span class="metric-item__val metric-item__val--green"
-                  >0.5203</span
-                >
-              </div>
-              <p class="metric-item__desc">
-                Menilai kualitas representasi kata dalam topik BERTopic. Ini
-                bukan metrik klasifikasi dan bukan pengganti DBCV.
-              </p>
-            </div>
-
-            <div class="metric-item">
-              <div class="metric-item__header">
-                <span class="metric-item__name">DBCV (sampled)</span>
-                <span class="metric-item__val metric-item__val--green"
-                  >-0.0133</span
-                >
-              </div>
-              <p class="metric-item__desc">
-                Metrik kualitas cluster berbasis densitas untuk UMAP + HDBSCAN.
-                Nilai negatif tipis menunjukkan cluster belum ideal secara
-                absolut, tetapi menjadi kandidat terbaik secara komparatif.
-              </p>
-            </div>
-
-            <div class="metric-item">
-              <div class="metric-item__header">
-                <span class="metric-item__name">Outlier Rate BERTopic</span>
-                <span class="metric-item__val metric-item__val--green"
-                  >21.90%</span
-                >
-              </div>
-              <p class="metric-item__desc">
-                Proporsi dokumen yang masuk label outlier HDBSCAN. Sebanyak
-                3.771 dari 17.218 dokumen tidak masuk cluster topik utama.
-              </p>
-            </div>
-
-            <div class="metric-item">
-              <div class="metric-item__header">
-                <span class="metric-item__name">Topik Final BERTopic</span>
-                <span class="metric-item__val metric-item__val--green">79</span>
-              </div>
-              <p class="metric-item__desc">
-                Jumlah topik non-outlier setelah evaluasi kandidat final. Topic
-                0 adalah topik valid, sedangkan outlier direpresentasikan
-                sebagai topic -1.
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <div class="model-block">
-          <h3 class="model-block__heading">Visualisasi Evaluasi</h3>
-
-          <div class="eval-tabs" role="tablist">
-            <button
-              class="eval-tab eval-tab--active"
-              role="tab"
-              aria-selected="true"
-              data-tab="cm"
-            >
-              Confusion Matrix
-            </button>
-            <button
-              class="eval-tab"
-              role="tab"
-              aria-selected="false"
-              data-tab="roc"
-            >
-              ROC Curve
-            </button>
-            <button
-              class="eval-tab"
-              role="tab"
-              aria-selected="false"
-              data-tab="topic"
-            >
-              Topik BERTopic
-            </button>
-            <button
-              class="eval-tab"
-              role="tab"
-              aria-selected="false"
-              data-tab="ctfidf"
-            >
-              c-TF-IDF
-            </button>
-            <button
-              class="eval-tab"
-              role="tab"
-              aria-selected="false"
-              data-tab="lain"
-            >
-              Grafik Lain
-            </button>
-          </div>
-
-          <div class="eval-panels">
-            <div class="eval-panel eval-panel--active" data-panel="cm">
-              <p class="eval-caption">
-                Grafik ini menunjukkan berapa banyak prediksi model yang benar
-                dan yang salah. Kotak di pojok kiri atas dan kanan bawah adalah
-                prediksi yang benar — semakin besar nilainya, semakin baik
-                performa model.
-              </p>
-              <div class="eval-img-row">
-                <figure class="eval-figure">
-                  <img
-                    src="/hasil/confusion_matrix_validation.png"
-                    alt="Confusion Matrix Validation"
-                    loading="lazy"
-                  />
-                  <figcaption>Validation Set</figcaption>
-                </figure>
-                <figure class="eval-figure">
-                  <img
-                    src="/hasil/confusion_matrix_test.png"
-                    alt="Confusion Matrix Test"
-                    loading="lazy"
-                  />
-                  <figcaption>Test Set</figcaption>
-                </figure>
-              </div>
-            </div>
-
-            <div class="eval-panel" data-panel="roc">
-              <p class="eval-caption">
-                Grafik ini memperlihatkan seberapa baik model memisahkan berita
-                hoaks dan fakta. Kurva yang mendekati sudut kiri atas berarti
-                model sangat andal — nilai AUC mendekati 100% adalah performa
-                terbaik.
-              </p>
-              <div class="eval-img-row">
-                <figure class="eval-figure">
-                  <img
-                    src="/hasil/roc_curve_validation.png"
-                    alt="ROC Curve Validation"
-                    loading="lazy"
-                  />
-                  <figcaption>Validation · AUC = 0.9998</figcaption>
-                </figure>
-                <figure class="eval-figure">
-                  <img
-                    src="/hasil/roc_curve_test.png"
-                    alt="ROC Curve Test"
-                    loading="lazy"
-                  />
-                  <figcaption>Test · AUC = 0.9999</figcaption>
-                </figure>
-              </div>
-            </div>
-
-            <div class="eval-panel" data-panel="topic">
-              <p class="eval-caption">
-                Grafik ini menampilkan tema-tema utama yang ditemukan model dari
-                ribuan berita. Setiap topik mewakili sekelompok berita bertema
-                serupa — misalnya politik, kesehatan, atau ekonomi.
-              </p>
-              <figure class="eval-figure eval-figure--full">
-                <img
-                  src="/hasil/distribusi_topik_bertopic.png"
-                  alt="Distribusi Topik BERTopic"
-                  loading="lazy"
-                />
-                <figcaption>
-                  Top-15 topik yang ditemukan dari 17.218 dokumen training
-                </figcaption>
-              </figure>
-              <figure class="eval-figure eval-figure--full">
-                <img
-                  src="/hasil/topik_per_label.png"
-                  alt="Topik per Label"
-                  loading="lazy"
-                />
-                <figcaption>
-                  Topik yang dominan pada berita hoaks dan non-hoaks
-                </figcaption>
-              </figure>
-            </div>
-
-            <div class="eval-panel" data-panel="ctfidf">
-              <p class="eval-caption">
-                Grafik ini menampilkan kata-kata yang paling sering dan paling
-                khas muncul di setiap topik. Warna lebih gelap berarti kata
-                tersebut sangat penting untuk membedakan satu topik dari topik
-                lainnya.
-              </p>
-              <figure class="eval-figure eval-figure--full">
-                <img
-                  src="/hasil/ctfidf_heatmap.png"
-                  alt="c-TF-IDF Heatmap"
-                  loading="lazy"
-                />
-                <figcaption>
-                  Kata paling khas per topik (intensitas warna = tingkat
-                  kepentingan)
-                </figcaption>
-              </figure>
-              <figure class="eval-figure eval-figure--full">
-                <img
-                  src="/hasil/ctfidf_distribusi_topik.png"
-                  alt="Distribusi Topik c-TF-IDF"
-                  loading="lazy"
-                />
-                <figcaption>
-                  Jumlah berita yang masuk ke setiap topik
-                </figcaption>
-              </figure>
-            </div>
-
-            <div class="eval-panel" data-panel="lain">
-              <p class="eval-caption">
-                Grafik kalibrasi threshold menunjukkan pemilihan threshold
-                runtime 0.47 yang menghasilkan F1-Score terbaik pada data
-                validasi.
-              </p>
-              <figure class="eval-figure eval-figure--full">
-                <img
-                  src="/hasil/kalibrasi_threshold_validation.png"
-                  alt="Kalibrasi Threshold"
-                  loading="lazy"
-                />
-                <figcaption>
-                  Kalibrasi threshold — threshold runtime: 0.47
-                </figcaption>
-              </figure>
-            </div>
-          </div>
-        </div>
-      </section>
     </main>
 
+    <!-- Memuat logika interaktif utama aplikasi (lihat app.js) -->
     <script src="app.js" type="module"></script>
 
-    <script>
-      (function () {
-        var tabs = document.querySelectorAll(".eval-tab");
-        var panels = document.querySelectorAll(".eval-panel");
-        tabs.forEach(function (tab) {
-          tab.addEventListener("click", function () {
-            var target = tab.dataset.tab;
-            tabs.forEach(function (t) {
-              t.classList.toggle("eval-tab--active", t.dataset.tab === target);
-              t.setAttribute("aria-selected", String(t.dataset.tab === target));
-            });
-            panels.forEach(function (p) {
-              p.classList.toggle(
-                "eval-panel--active",
-                p.dataset.panel === target,
-              );
-            });
-          });
-        });
-      })();
-    </script>
   </body>
 </html>

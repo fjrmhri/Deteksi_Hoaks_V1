@@ -7,6 +7,7 @@ tunggal, batch teks, maupun analisis multi-paragraf (segmentasi kalimat,
 klasifikasi per kalimat, agregasi verdict dokumen, dan ekstraksi topik).
 """
 
+# ==== Import pustaka standar Python ====
 import json
 import os
 import random
@@ -16,6 +17,8 @@ from collections import Counter, defaultdict
 from threading import Lock
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+
+# ==== Import pustaka pihak ketiga (numerik, model, dan web framework) ====
 import numpy as np
 import torch
 from fastapi import FastAPI
@@ -23,21 +26,33 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
+
+# ==== Konfigurasi lingkungan (environment variables) ====
+# Semua nilai berikut bisa dioverride lewat environment variable saat deploy,
+# sehingga model, threshold, dan ukuran batch dapat diatur tanpa mengubah kode.
 MODEL_ID        = os.getenv("MODEL_ID", "fjrmhri/deteksi_hoaks_indobert")
 SUBFOLDER       = os.getenv("MODEL_SUBFOLDER", "") or None
 MAX_LENGTH      = int(os.getenv("MAX_LENGTH", "256"))
 
+
+# Ambang batas (threshold) probabilitas untuk menentukan level risiko hoaks
 THRESH_HIGH     = float(os.getenv("HOAX_THRESH_HIGH", "0.80"))
 THRESH_MED      = float(os.getenv("HOAX_THRESH_MED",  "0.50"))
 
+
+# Aturan khusus untuk kalimat pendek (rawan salah klasifikasi karena minim konteks)
 MIN_KATA_KALIMAT      = int(os.getenv("MIN_KATA_KALIMAT", "8"))
 THRESH_KALIMAT_PENDEK = float(os.getenv("THRESH_KALIMAT_PENDEK", "0.70"))
 
+
+# Ukuran batch untuk proses prediksi & embedding, memengaruhi kecepatan inferensi
 PREDICT_BATCH_SIZE   = int(os.getenv("PREDICT_BATCH_SIZE", "64"))
 SENTENCE_BATCH_SIZE  = int(os.getenv("SENTENCE_BATCH_SIZE", "64"))
 SENTENCE_AMBER_CONF  = float(os.getenv("SENTENCE_AMBER_CONF", "0.70"))
 BERTOPIC_EMBED_BATCH = int(os.getenv("BERTOPIC_EMBED_BATCH", "32"))
 
+
+# Konfigurasi model BERTopic untuk ekstraksi topik paragraf
 TOPIC_KEYWORDS_TOPK     = int(os.getenv("TOPIC_KEYWORDS_TOPK", "3"))
 TOPIC_BERTOPIC_MODEL_ID = os.getenv(
     "TOPIC_BERTOPIC_MODEL_ID", "fjrmhri/deteksi_hoaks_bertopic"
@@ -48,15 +63,23 @@ BERTOPIC_EMBED_MODEL_ID = os.getenv(
     "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
 )
 
+
+# Konfigurasi logging sampel hasil prediksi (nonaktif secara default)
 ENABLE_LOGGING  = os.getenv("ENABLE_HOAX_LOGGING", "0") == "1"
 LOG_SAMPLE_RATE = float(os.getenv("HOAX_LOG_SAMPLE_RATE", "0.2"))
 
+
+# ==== Inisialisasi perangkat komputasi (GPU jika tersedia, jika tidak pakai CPU) ====
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 if torch.cuda.is_available():
     torch.set_float32_matmul_precision("high")
 
+
+# Direktori tempat file app.py ini berada, dipakai untuk mencari file konfigurasi lokal
 _BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
 
+
+# Menampilkan ringkasan konfigurasi ke log saat aplikasi pertama kali dijalankan
 print("======================================")
 print(f"Loading IndoBERT dari Hub : {MODEL_ID}")
 print(f"Device                    : {DEVICE}")
@@ -66,6 +89,9 @@ print(f"BERTopic embed model      : {BERTOPIC_EMBED_MODEL_ID}")
 print("======================================")
 
 
+# ==== Fungsi pemuat model & tokenizer IndoBERT dari Hugging Face Hub ====
+# Mencoba memuat dari subfolder tertentu (jika diatur), lalu fallback ke root repo
+# apabila pemuatan subfolder gagal.
 def _load_model_artifacts():
     kw = {}
     if SUBFOLDER:
@@ -83,10 +109,13 @@ def _load_model_artifacts():
         raise
 
 
+# ==== Inisialisasi variabel global: model & tokenizer siap pakai ====
 tokenizer, model = _load_model_artifacts()
 model.to(DEVICE)
 model.eval()
 
+
+# ==== Inisialisasi variabel global: pemetaan label prediksi & threshold klasifikasi ====
 ID2LABEL: Dict[int, str] = {0: "not_hoax", 1: "hoax"}
 
 _DEFAULT_THRESHOLD_OPTIMAL: float = 0.47
@@ -94,11 +123,14 @@ _INFERENCE_CONFIG: Dict[str, Any] = {}
 _THRESHOLD_OPTIMAL: float = _DEFAULT_THRESHOLD_OPTIMAL
 
 
+# ==== Fungsi pembaca file konfigurasi inferensi (JSON) ====
 def _read_inference_config(cfg_path: str) -> Dict[str, Any]:
     with open(cfg_path, encoding="utf-8") as _f:
         return json.load(_f)
 
 
+# ==== Fungsi pemuat konfigurasi inferensi ====
+# Prioritas: file lokal (folder backend atau public/hasil) baru fallback unduh dari Hub.
 def _load_inference_config() -> Tuple[Dict[str, Any], str]:
     local_candidates = (
         os.path.join(_BACKEND_DIR, "inference_config.json"),
@@ -122,6 +154,8 @@ def _load_inference_config() -> Tuple[Dict[str, Any], str]:
         raise hub_error
 
 
+# Memuat threshold_optimal & id2label dari inference_config.json apabila tersedia,
+# jika gagal maka aplikasi tetap berjalan dengan nilai default.
 try:
     _INFERENCE_CONFIG, _cfg_path = _load_inference_config()
     _THRESHOLD_OPTIMAL = float(
@@ -145,6 +179,9 @@ except Exception as _e:
     print(f"[INFO] inference_config.json tidak tersedia ({_e}). Pakai {_THRESHOLD_OPTIMAL}")
 
 
+# ==== Inisialisasi variabel global: peta kategori topik berbasis kata kunci ====
+# Dipakai sebagai pengklasifikasi topik berbasis aturan (rule-based) sebelum
+# jatuh ke BERTopic untuk teks yang tidak cocok kategori manapun.
 PETA_KATEGORI: List[Tuple[str, set]] = [
     ("Kriminal & Hukum", {
         "polisi", "tersangka", "pengadilan", "hukum", "penjara", "korupsi",
@@ -381,6 +418,7 @@ PETA_KATEGORI: List[Tuple[str, set]] = [
 ]
 
 
+# ==== Fungsi kategorisasi topik berbasis kata kunci (rule-based) ====
 def _kategorisasi_teks(teks: str) -> Optional[Tuple[str, float]]:
     teks_lower = teks.lower()
     teks_clean = re.sub(r"[^\w\s]", " ", teks_lower)
@@ -408,12 +446,15 @@ def _kategorisasi_teks(teks: str) -> Optional[Tuple[str, float]]:
     return best_nama, _round6(best_skor)
 
 
+# ==== Inisialisasi variabel global: status model BERTopic (dimuat secara asinkron) ====
 _bertopic_model = None
 _st_embedder    = None
 _bertopic_lock  = Lock()
 _bertopic_ready = False
 
 
+# ==== Fungsi pemuat BERTopic & sentence embedder di thread terpisah ====
+# Dijalankan di background agar startup API tidak menunggu proses loading yang berat.
 def _load_bertopic_background():
     global _bertopic_model, _st_embedder, _bertopic_ready
     with _bertopic_lock:
@@ -435,9 +476,11 @@ def _load_bertopic_background():
             _bertopic_ready = True
 
 
+# Memulai thread background untuk memuat BERTopic tanpa memblokir startup server
 threading.Thread(target=_load_bertopic_background, daemon=True).start()
 
 
+# ==== Fungsi pengambil komponen BERTopic yang sudah siap (thread-safe) ====
 def _get_bertopic_components() -> Tuple[Optional[Any], Optional[Any]]:
     with _bertopic_lock:
         if _bertopic_ready:
@@ -445,8 +488,11 @@ def _get_bertopic_components() -> Tuple[Optional[Any], Optional[Any]]:
         return None, None
 
 
+# ==== Inisialisasi aplikasi FastAPI ====
 app = FastAPI(title="Indo Hoax Detector API", version="3.3.2")
 
+
+# Mengizinkan akses lintas origin (CORS) agar frontend dapat memanggil API ini
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -456,6 +502,7 @@ app.add_middleware(
 )
 
 
+# ==== Skema request & response (Pydantic models) untuk endpoint prediksi teks tunggal/batch ====
 class PredictRequest(BaseModel):
     text: str
 
@@ -474,6 +521,8 @@ class PredictResponse(BaseModel):
 class BatchPredictResponse(BaseModel):
     results: List[PredictResponse]
 
+
+# ==== Skema request & response (Pydantic models) untuk endpoint analisis multi-paragraf ====
 class AnalyzeRequest(BaseModel):
     text: str
     topic_per_paragraph: bool = False
@@ -536,6 +585,7 @@ class AnalyzeResponse(BaseModel):
     meta: AnalyzeMeta
 
 
+# ==== Inisialisasi variabel global: pola regex & topik fallback ====
 PARAGRAPH_SPLIT_RE = re.compile(r"(?:\r?\n){2,}")
 SENTENCE_SPLIT_RE  = re.compile(r'[^.!?]+(?:[.!?]+(?:[")\]]+)?)|[^.!?]+$')
 WS_RE              = re.compile(r"\s+")
@@ -543,10 +593,12 @@ WS_RE              = re.compile(r"\s+")
 _FALLBACK_TOPIC = TopicInfo(label="Topik Umum", score=0.0, keywords=["topik_umum"])
 
 
+# ==== Fungsi pembulatan angka ke 6 desimal (menjaga konsistensi output) ====
 def _round6(v: float) -> float:
     return float(round(float(v), 6))
 
 
+# ==== Fungsi pembentuk objek TopicInfo dari hasil kategorisasi rule-based ====
 def _topic_kategori(
     nama: str,
     skor: float,
@@ -559,6 +611,7 @@ def _topic_kategori(
     )
 
 
+# ==== Fungsi kategorisasi topik dari daftar kata kunci hasil BERTopic ====
 def _kategori_dari_keywords(keywords: List[str]) -> TopicInfo:
     if not keywords:
         return _FALLBACK_TOPIC
@@ -573,20 +626,26 @@ def _kategori_dari_keywords(keywords: List[str]) -> TopicInfo:
     return _topic_kategori(nama, skor, keywords)
 
 
+# ==== Fungsi pemecah list menjadi beberapa chunk sesuai ukuran batch ====
 def _iter_chunks(items: List[str], chunk_size: int) -> Iterable[List[str]]:
     chunk_size = max(1, chunk_size)
     for i in range(0, len(items), chunk_size):
         yield items[i:i + chunk_size]
 
 
+# ==== Fungsi normalisasi spasi/whitespace pada teks ====
 def _normalize_unit_text(text: str) -> str:
     return WS_RE.sub(" ", str(text)).strip()
 
 
+# ==== Fungsi penyiap daftar teks sebelum diproses model (menangani teks kosong) ====
 def _prepare_texts(texts: List[str]) -> List[str]:
     return [_normalize_unit_text(t) if t else "[EMPTY]" for t in texts]
 
 
+# ==== Fungsi inferensi utama: menghitung probabilitas hoax/not_hoax dari IndoBERT ====
+# Melakukan deduplikasi teks identik agar tidak dihitung berulang, lalu memetakan
+# kembali hasilnya ke urutan input asli.
 def _predict_proba(texts: List[str], batch_size: int = SENTENCE_BATCH_SIZE) -> List[Dict[str, float]]:
     if not texts:
         return []
@@ -616,6 +675,7 @@ def _predict_proba(texts: List[str], batch_size: int = SENTENCE_BATCH_SIZE) -> L
     return [dict(unique_results[i]) for i in inverse]
 
 
+# ==== Fungsi pengekstrak probabilitas kelas 'hoax' dari hasil prediksi model ====
 def _extract_hoax_probability(prob_dict: Dict[str, float]) -> float:
     if not prob_dict:
         return 0.0
@@ -631,6 +691,7 @@ def _extract_hoax_probability(prob_dict: Dict[str, float]) -> float:
     return 0.0
 
 
+# ==== Fungsi pengekstrak probabilitas kelas 'not_hoax' dari hasil prediksi model ====
 def _extract_not_hoax_probability(prob_dict: Dict[str, float], p_hoax: float) -> float:
     if not prob_dict:
         return float(1.0 - p_hoax)
@@ -641,6 +702,7 @@ def _extract_not_hoax_probability(prob_dict: Dict[str, float], p_hoax: float) ->
     return float(max(0.0, min(1.0, 1.0 - p_hoax)))
 
 
+# ==== Fungsi penentu level risiko & penjelasannya berdasarkan probabilitas hoaks ====
 def analyze_risk(p_hoax: float, original_text: Optional[str] = None) -> Tuple[str, str]:
     if p_hoax > THRESH_HIGH:
         level = "high"
@@ -667,6 +729,7 @@ def analyze_risk(p_hoax: float, original_text: Optional[str] = None) -> Tuple[st
     return level, explanation
 
 
+# ==== Fungsi pemecah teks menjadi paragraf ====
 def _split_paragraphs(text: str) -> List[str]:
     raw = str(text).strip()
     if not raw:
@@ -679,6 +742,7 @@ def _split_paragraphs(text: str) -> List[str]:
     return paragraphs or [raw]
 
 
+# ==== Fungsi pemecah paragraf menjadi kalimat ====
 def _split_sentences(paragraph: str) -> List[str]:
     normalized = _normalize_unit_text(paragraph)
     if not normalized:
@@ -687,6 +751,7 @@ def _split_sentences(paragraph: str) -> List[str]:
     return [s for s in sentences if s] or [normalized]
 
 
+# ==== Fungsi penentu warna highlight kalimat pada hasil analisis ====
 def _sentence_color(label: str, confidence: float) -> str:
     if label == "hoax":
         return "red"
@@ -695,6 +760,7 @@ def _sentence_color(label: str, confidence: float) -> str:
     return "green"
 
 
+# ==== Fungsi penentu label kanonik (hoax/not_hoax) berdasarkan threshold ====
 def _to_canonical_label(p_hoax: float, teks: Optional[str] = None) -> str:
     thresh = _THRESHOLD_OPTIMAL
     if teks is not None:
@@ -704,6 +770,7 @@ def _to_canonical_label(p_hoax: float, teks: Optional[str] = None) -> str:
     return "hoax" if p_hoax >= thresh else "not_hoax"
 
 
+# ==== Fungsi encoding teks menjadi embedding menggunakan SentenceTransformer ====
 def _st_encode(texts: List[str], embedder) -> np.ndarray:
     return embedder.encode(
         texts, batch_size=BERTOPIC_EMBED_BATCH,
@@ -711,6 +778,7 @@ def _st_encode(texts: List[str], embedder) -> np.ndarray:
     )
 
 
+# ==== Fungsi inferensi topik per paragraf (gabungan rule-based & BERTopic) ====
 def _infer_topic_per_paragraf(texts: List[str]) -> List[TopicInfo]:
     rule_results: List[Optional[Tuple[str, float]]] = [
         _kategorisasi_teks(t) for t in texts
@@ -750,6 +818,7 @@ def _infer_topic_per_paragraf(texts: List[str]) -> List[TopicInfo]:
     return final
 
 
+# ==== Fungsi pembentuk response prediksi tunggal (label, skor, level risiko) ====
 def _build_predict_response(prob_dict: Dict[str, float], original_text: str) -> PredictResponse:
     p_hoax = _extract_hoax_probability(prob_dict)
     p_not_hoax = _extract_not_hoax_probability(prob_dict, p_hoax)
@@ -771,6 +840,7 @@ def _build_predict_response(prob_dict: Dict[str, float], original_text: str) -> 
     )
 
 
+# ==== Fungsi logging sampel hasil prediksi (aktif hanya jika ENABLE_LOGGING=1) ====
 def _maybe_log(sample_info: Dict):
     if not ENABLE_LOGGING:
         return
@@ -779,6 +849,7 @@ def _maybe_log(sample_info: Dict):
     print("[HOAX_LOG]", sample_info)
 
 
+# ==== Fungsi agregasi verdict dokumen dari kumpulan hasil klasifikasi per kalimat ====
 def _aggregate_verdict(
     all_sentences: List[SentenceAnalysis],
 ) -> Tuple[str, float, float]:
@@ -805,6 +876,7 @@ def _aggregate_verdict(
     return "not_hoax", mean_p_hoax, p_fakta_doc
 
 
+# ==== Endpoint root: menampilkan info & konfigurasi API yang sedang berjalan ====
 @app.get("/")
 def read_root():
     return {
@@ -824,11 +896,13 @@ def read_root():
     }
 
 
+# ==== Endpoint health check: memastikan API & status BERTopic siap diakses ====
 @app.get("/health")
 def health_check():
     return {"status": "ok", "bertopic_ready": _bertopic_ready}
 
 
+# ==== Endpoint prediksi hoaks untuk satu teks tunggal ====
 @app.post("/predict", response_model=PredictResponse)
 def predict(request: PredictRequest):
     original_text = request.text
@@ -844,6 +918,7 @@ def predict(request: PredictRequest):
     return response
 
 
+# ==== Endpoint prediksi hoaks untuk beberapa teks sekaligus (batch) ====
 @app.post("/predict-batch", response_model=BatchPredictResponse)
 def predict_batch(request: BatchPredictRequest):
     texts     = request.texts or []
@@ -855,6 +930,8 @@ def predict_batch(request: BatchPredictRequest):
     return BatchPredictResponse(results=results)
 
 
+# ==== Endpoint analisis dokumen lengkap: segmentasi kalimat, klasifikasi per kalimat,
+# agregasi verdict dokumen, dan ekstraksi topik per paragraf ====
 @app.post("/analyze", response_model=AnalyzeResponse)
 def analyze(request: AnalyzeRequest):
     original_text = _normalize_unit_text(request.text)
@@ -995,6 +1072,7 @@ def analyze(request: AnalyzeRequest):
     )
 
 
+# ==== Entry point: menjalankan server Uvicorn saat file dieksekusi langsung ====
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", "7860"))

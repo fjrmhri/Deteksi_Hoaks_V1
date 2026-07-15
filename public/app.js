@@ -8,11 +8,16 @@
  * ke dalam antarmuka index.html.
  */
 
+// ==== Konfigurasi lingkungan & konstanta aplikasi frontend ====
+// Nilai-nilai ini mengatur endpoint backend, batas waktu request, ambang
+// confidence untuk highlight, dan panjang maksimum teks pada panel detail.
 const DEFAULT_API_BASE_URL = "https://fjrmhri-ta-final-space.hf.space";
 const API_TIMEOUT_MS = 25000;
 const CONFIDENCE_CUTOFF = 0.65;
 const DETAIL_TEXT_MAX_LEN = 190;
 
+// Daftar putih (whitelist) label kategori topik yang valid ditampilkan di UI,
+// harus selaras dengan PETA_KATEGORI pada backend (app.py).
 const TOPIC_CATEGORY_LABELS = new Set([
   // [FIX-PC3] Tambah 2 kategori yang sudah ada di PETA_KATEGORI backend
   // ([FIX-PC2]) tapi belum masuk whitelist frontend, sehingga sebelumnya
@@ -37,6 +42,8 @@ const TOPIC_CATEGORY_LABELS = new Set([
   "Transportasi & Infrastruktur",
 ]);
 
+// Merapikan format base URL API: mengonversi tautan Hugging Face Spaces
+// menjadi domain *.hf.space dan membuang trailing slash.
 function normalizeApiBaseUrl(rawUrl) {
   const raw = String(rawUrl || "").trim();
   if (!raw) return "";
@@ -47,6 +54,8 @@ function normalizeApiBaseUrl(rawUrl) {
   return raw.replace(/\/+$/, "");
 }
 
+// Menentukan base URL API final: prioritas dari query string ?api=,
+// lalu variabel global window.__HOAX_API_BASE_URL__, baru fallback default.
 function resolveApiBaseUrl() {
   const q =
     typeof window !== "undefined"
@@ -60,9 +69,10 @@ function resolveApiBaseUrl() {
   );
 }
 
+// ==== Inisialisasi variabel global: base URL API ====
 const apiBaseUrl = resolveApiBaseUrl();
-let lastPayload = null;
 
+// ==== Inisialisasi variabel global: referensi elemen-elemen DOM ====
 const detectBtn = document.getElementById("detectBtn");
 const detectLabel = document.getElementById("detectLabel");
 const detectSpinner = document.getElementById("detectSpinner");
@@ -89,6 +99,7 @@ const confidenceDetails = document.getElementById("confidenceDetails");
 const confidenceSummary = document.getElementById("confidenceSummary");
 const confidenceList = document.getElementById("confidenceList");
 
+// Meng-escape karakter HTML agar teks dari pengguna aman disisipkan sebagai innerHTML
 function escapeHtml(text) {
   return String(text || "")
     .replace(/&/g, "&amp;")
@@ -98,17 +109,20 @@ function escapeHtml(text) {
     .replace(/'/g, "&#039;");
 }
 
+// Memotong teks panjang untuk ditampilkan ringkas pada panel rincian confidence
 function truncate(text, maxLen = DETAIL_TEXT_MAX_LEN) {
   const raw = String(text || "").trim();
   return raw.length <= maxLen ? raw : `${raw.slice(0, maxLen - 3)}...`;
 }
 
+// Memformat angka probabilitas (0-1) menjadi string persentase 2 desimal
 function formatPercent(value) {
   const n = Number(value);
   if (!Number.isFinite(n)) return "0.00%";
   return `${(n * 100).toFixed(2)}%`;
 }
 
+// Menormalkan skor topik dari backend (bisa berupa angka 0-1, persen, atau string) ke skala 0-1
 function normalizeTopicScore(score) {
   let p = score;
   if (typeof p === "string") {
@@ -122,11 +136,13 @@ function normalizeTopicScore(score) {
   return null;
 }
 
+// Membersihkan label topik mentah; label kosong atau '-' dianggap tidak ada
 function cleanTopicLabel(rawLabel) {
   const label = String(rawLabel ?? "").trim();
   return !label || label === "-" ? null : label;
 }
 
+// Memvalidasi label topik terhadap whitelist TOPIC_CATEGORY_LABELS sebelum ditampilkan
 function normalizeTopicCategoryLabel(rawLabel) {
   const label = cleanTopicLabel(rawLabel);
   if (!label) return null;
@@ -134,10 +150,12 @@ function normalizeTopicCategoryLabel(rawLabel) {
   return TOPIC_CATEGORY_LABELS.has(label) ? label : null;
 }
 
+// Menyeragamkan karakter newline (CRLF/CR menjadi LF) sebelum diproses
 function normalizeNewlines(text) {
   return String(text || "").replace(/\r\n?/g, "\n");
 }
 
+// Memecah teks menjadi paragraf berdasarkan baris kosong (mengikuti aturan backend)
 function splitParagraphsByBlankLine(text) {
   return normalizeNewlines(text)
     .split(/\n\s*\n+/)
@@ -145,6 +163,7 @@ function splitParagraphsByBlankLine(text) {
     .filter((p) => p.length > 0);
 }
 
+// Memecah paragraf menjadi kalimat secara heuristik berbasis tanda baca akhir kalimat
 function splitSentencesHeuristic(text) {
   const raw = String(text || "");
   const matches = raw.match(/[^.!?]+(?:[.!?]+|$)/g) || [];
@@ -154,6 +173,7 @@ function splitSentencesHeuristic(text) {
   return fallback ? [fallback] : [];
 }
 
+// Kumpulan fungsi penghitung statistik input (jumlah paragraf, kalimat, dan kata)
 function countParagraphs(text) {
   return splitParagraphsByBlankLine(text).length;
 }
@@ -167,6 +187,7 @@ function countWords(text) {
     .filter(Boolean).length;
 }
 
+// Memperbarui tampilan ringkasan statistik (paragraf/kalimat/kata) saat pengguna mengetik
 function updateInputStats() {
   const text = String(newsText?.value || "");
   if (statParagraphs)
@@ -176,6 +197,7 @@ function updateInputStats() {
   if (statWords) statWords.textContent = `Kata: ${countWords(text)}`;
 }
 
+// Merapikan jeda antar paragraf pada teks input sebelum dikirim ke backend
 function normalizeParagraphBreaks(text) {
   const n = normalizeNewlines(text);
   if (!n.includes("\n")) return n;
@@ -183,6 +205,7 @@ function normalizeParagraphBreaks(text) {
   return n.replace(/\n+/g, "\n\n");
 }
 
+// Menormalkan label mentah dari backend ('hoax'/'not_hoax'/dsb.) menjadi 'hoaks' atau 'fakta'
 function normalizeLabel(rawLabel) {
   const value = String(rawLabel || "")
     .toLowerCase()
@@ -210,12 +233,14 @@ function normalizeLabel(rawLabel) {
   return "unknown";
 }
 
+// Menerjemahkan label kanonik menjadi teks tampilan berbahasa Indonesia
 function labelText(n) {
   if (n === "hoaks") return "Hoaks";
   if (n === "fakta") return "Fakta";
   return "Tidak diketahui";
 }
 
+// Menentukan class CSS highlight kalimat/paragraf berdasarkan label & confidence
 function kelasHighlight(label, confidence) {
   const conf = Number(confidence);
   if (Number.isFinite(conf) && conf < CONFIDENCE_CUTOFF) return "hl--orange";
@@ -225,18 +250,21 @@ function kelasHighlight(label, confidence) {
   return "hl--orange";
 }
 
+// Menentukan class CSS badge status (merah/hijau/oranye) pada panel rincian confidence
 function badgeClass(label, confidence) {
   const conf = Number(confidence);
   if (Number.isFinite(conf) && conf < CONFIDENCE_CUTOFF) return "badge--orange";
   return normalizeLabel(label) === "hoaks" ? "badge--red" : "badge--green";
 }
 
+// Menentukan teks badge status ('Hoaks'/'Fakta'/'Ragu') pada panel rincian confidence
 function badgeText(label, confidence) {
   const conf = Number(confidence);
   if (Number.isFinite(conf) && conf < CONFIDENCE_CUTOFF) return "Ragu";
   return normalizeLabel(label) === "hoaks" ? "Hoaks" : "Fakta";
 }
 
+// Mengambil probabilitas hoaks dari objek kalimat, dengan beberapa kemungkinan bentuk payload
 function getSentenceHoaxProb(sentence) {
   if (Number.isFinite(Number(sentence?.hoax_probability)))
     return Number(sentence.hoax_probability);
@@ -245,12 +273,14 @@ function getSentenceHoaxProb(sentence) {
   return 0;
 }
 
+// Mengambil probabilitas fakta dari objek kalimat, fallback ke (1 - probabilitas hoaks)
 function getSentenceFaktaProb(sentence) {
   const probs = sentence?.probabilities || {};
   if (Number.isFinite(Number(probs.not_hoax))) return Number(probs.not_hoax);
   return Math.max(0, Math.min(1, 1 - getSentenceHoaxProb(sentence)));
 }
 
+// Mengekstrak info topik global (label & skor) dari payload hasil analisis backend
 function extractGlobalTopic(payload) {
   const safe = payload && typeof payload === "object" ? payload : {};
   const tg = safe.topics_global;
@@ -265,6 +295,7 @@ function extractGlobalTopic(payload) {
   return { label: null, score: null };
 }
 
+// Menentukan label topik yang ditampilkan per paragraf, dengan fallback ke topik global
 function getParagraphTopicLabel(paragraph, payload) {
   const backendLabel = normalizeTopicCategoryLabel(paragraph?.topic?.label);
   if (backendLabel) return backendLabel;
@@ -275,6 +306,7 @@ function getParagraphTopicLabel(paragraph, payload) {
   return "Topik Umum";
 }
 
+// Menampilkan kotak pesan error ke pengguna
 function showError(message) {
   if (!errorBox) return;
   if (errorText) errorText.textContent = message;
@@ -282,6 +314,7 @@ function showError(message) {
   errorBox.classList.remove("hidden");
 }
 
+// Menyembunyikan & mengosongkan kotak pesan error
 function clearError() {
   if (!errorBox) return;
   if (errorText) errorText.textContent = "";
@@ -289,6 +322,7 @@ function clearError() {
   errorBox.classList.add("hidden");
 }
 
+// Mengatur tampilan tombol deteksi (label & spinner) selama proses analisis berjalan
 function setLoading(isLoading) {
   if (!detectBtn || !detectLabel || !detectSpinner) return;
   detectBtn.disabled = isLoading;
@@ -302,6 +336,7 @@ function setLoading(isLoading) {
   }
 }
 
+// Mengosongkan seluruh area hasil analisis sebelum render ulang
 function resetOutput() {
   if (outputParagraphs) outputParagraphs.innerHTML = "";
   if (globalSummary) globalSummary.textContent = "";
@@ -317,6 +352,7 @@ function resetOutput() {
   }
 }
 
+// Merender banner verdict (hoaks/fakta), confidence, dan topik global ke antarmuka
 function renderVerdict(payload) {
   if (!verdictBanner || !verdictIcon || !verdictLabel || !verdictConf) return;
 
@@ -349,6 +385,7 @@ function renderVerdict(payload) {
   verdictBanner.classList.remove("hidden");
 }
 
+// Melakukan fetch dengan pembatalan otomatis (AbortController) jika melebihi batas waktu
 async function fetchWithTimeout(url, options = {}, timeoutMs = API_TIMEOUT_MS) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -359,6 +396,8 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = API_TIMEOUT_MS) {
   }
 }
 
+// Memanggil endpoint /analyze pada backend; otomatis retry dengan skema request lama
+// (tanpa parameter tambahan) apabila backend membalas 422 Unprocessable Entity.
 async function callAnalyzeApi(text, sentenceLevel, topicPerParagraph) {
   if (!apiBaseUrl) throw new Error("API base URL kosong.");
   const endpoint = `${apiBaseUrl}/analyze`;
@@ -405,6 +444,7 @@ async function callAnalyzeApi(text, sentenceLevel, topicPerParagraph) {
   }
 }
 
+// Mengurutkan array objek berdasarkan properti index numerik (paragraph_index/sentence_index)
 function sortByIndex(arr, key) {
   return [...(Array.isArray(arr) ? arr : [])].sort((a, b) => {
     const ai = Number.isFinite(Number(a?.[key])) ? Number(a[key]) : 0;
@@ -413,14 +453,7 @@ function sortByIndex(arr, key) {
   });
 }
 
-function computeParagraphLabel(sentences) {
-  const safe = Array.isArray(sentences) ? sentences : [];
-  const hoaxCount = safe.filter(
-    (s) => normalizeLabel(s?.label) === "hoaks",
-  ).length;
-  return hoaxCount > safe.length / 2 ? "hoaks" : "fakta";
-}
-
+// Membangun model ringkasan jumlah hoaks/fakta/ragu, baik per kalimat maupun per paragraf
 function buildSummaryModel(paragraphs, mode) {
   const items = Array.isArray(paragraphs) ? paragraphs : [];
   const sc = { hoaks: 0, fakta: 0, ragu: 0 };
@@ -471,6 +504,7 @@ function buildSummaryModel(paragraphs, mode) {
   };
 }
 
+// Membangun markup teks ringkasan global dari model ringkasan (buildSummaryModel)
 function buildSummaryMarkup(sm) {
   const lines = [];
   if (sm.mode === "sentence") {
@@ -488,6 +522,8 @@ function buildSummaryMarkup(sm) {
   return lines.map((l) => escapeHtml(l)).join("<br>");
 }
 
+// Fallback: memetakan ulang kalimat ke paragraf sesuai input asli pengguna,
+// dipakai saat backend menggabungkan seluruh teks menjadi satu paragraf saja.
 function buildFallbackParagraphs(backendParagraphs, inputText) {
   const inputPars = splitParagraphsByBlankLine(inputText);
   const sorted = sortByIndex(backendParagraphs, "paragraph_index");
@@ -533,11 +569,13 @@ function buildFallbackParagraphs(backendParagraphs, inputText) {
   return rebuilt;
 }
 
+// Mengambil daftar paragraf final (dengan fallback) yang siap dirender ke UI
 function extractParagraphs(payload, inputText) {
   if (!payload || !Array.isArray(payload.paragraphs)) return [];
   return buildFallbackParagraphs(payload.paragraphs, inputText);
 }
 
+// Menentukan perlu-tidaknya spasi penyambung saat kalimat-kalimat digabung kembali
 function needsSoftSpace(prev, curr) {
   if (!prev || !curr) return false;
   if (/\s$/.test(prev) || /^\s/.test(curr)) return false;
@@ -545,6 +583,7 @@ function needsSoftSpace(prev, curr) {
   return true;
 }
 
+// Menggabungkan kalimat-kalimat menjadi satu string HTML dengan highlight per label
 function joinHighlighted(sentences) {
   const ordered = sortByIndex(sentences, "sentence_index");
   const chunks = [];
@@ -570,6 +609,7 @@ function joinHighlighted(sentences) {
   return html;
 }
 
+// Merender seluruh paragraf hasil analisis (highlight kalimat/paragraf & info topik) ke UI
 function renderOutput(payload, paragraphs, sentenceLevel, topicPerParagraph) {
   if (!outputSection || !outputParagraphs || !globalSummary) return null;
   outputParagraphs.innerHTML = "";
@@ -637,6 +677,7 @@ function renderOutput(payload, paragraphs, sentenceLevel, topicPerParagraph) {
   return sm;
 }
 
+// Merender panel rincian confidence per kalimat atau per paragraf
 function renderConfidence(paragraphs, sentenceLevel, sm) {
   if (!confidenceDetails || !confidenceSummary || !confidenceList) return;
 
@@ -771,15 +812,16 @@ function renderConfidence(paragraphs, sentenceLevel, sm) {
   confidenceDetails.classList.remove("hidden");
 }
 
+// Handler tombol reset: mengosongkan input teks & seluruh hasil analisis di layar
 function handleReset() {
   if (newsText) newsText.value = "";
-  lastPayload = null;
   clearError();
   resetOutput();
   updateInputStats();
   if (newsText) newsText.focus();
 }
 
+// Handler tombol deteksi: memvalidasi input, memanggil backend, lalu merender seluruh hasil
 async function handleDetect() {
   clearError();
   resetOutput();
@@ -803,8 +845,6 @@ async function handleDetect() {
       sentenceLevel,
       topicPerParagraph,
     );
-    lastPayload = payload;
-
     renderVerdict(payload);
 
     const paragraphs = extractParagraphs(payload, textToSend);
@@ -824,6 +864,7 @@ async function handleDetect() {
   }
 }
 
+// ==== Pendaftaran event listener utama (tombol aksi & input teks) ====
 if (detectBtn) detectBtn.addEventListener("click", handleDetect);
 if (resetBtn) resetBtn.addEventListener("click", handleReset);
 
@@ -837,4 +878,5 @@ if (newsText) {
   });
 }
 
+// Inisialisasi awal: tampilkan statistik input begitu halaman selesai dimuat
 updateInputStats();
