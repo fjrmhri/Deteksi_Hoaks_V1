@@ -11,3 +11,4 @@ bertopic
 sentence-transformers
 umap-learn
 hdbscan
+requests

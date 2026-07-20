@@ -93,6 +93,8 @@ const verdictIcon = document.getElementById("verdictIcon");
 const verdictLabel = document.getElementById("verdictLabel");
 const verdictConf = document.getElementById("verdictConf");
 const verdictTopic = document.getElementById("verdictTopic");
+const evidenceSection = document.getElementById("evidenceSection");
+const evidenceList = document.getElementById("evidenceList");
 const globalSummary = document.getElementById("globalSummary");
 const outputParagraphs = document.getElementById("outputParagraphs");
 const confidenceDetails = document.getElementById("confidenceDetails");
@@ -343,6 +345,8 @@ function resetOutput() {
   if (outputSection) outputSection.classList.add("hidden");
   if (verdictBanner) verdictBanner.classList.add("hidden");
   if (verdictTopic) verdictTopic.classList.add("hidden");
+  if (evidenceSection) evidenceSection.classList.add("hidden");
+  if (evidenceList) evidenceList.innerHTML = "";
   if (confidenceList) confidenceList.innerHTML = "";
   if (confidenceSummary)
     confidenceSummary.textContent = "Rincian Keyakinan per Kalimat";
@@ -383,6 +387,106 @@ function renderVerdict(payload) {
   }
 
   verdictBanner.classList.remove("hidden");
+}
+
+// Menentukan class badge berdasarkan verdict artikel evidence ('hoax'/'fakta'/lainnya
+// dari backend RAG) -- memakai ulang class badge--merah/hijau/oranye yang sudah ada
+// di panel Rincian Keyakinan, supaya konsisten secara visual.
+function evidenceBadgeClass(verdict) {
+  const v = String(verdict || "").toLowerCase();
+  if (v === "hoax" || v === "hoaks") return "badge--red";
+  if (v === "fakta") return "badge--green";
+  return "badge--orange";
+}
+
+// Menerjemahkan verdict artikel evidence menjadi teks tampilan berbahasa Indonesia
+function evidenceBadgeText(verdict) {
+  const v = String(verdict || "").toLowerCase();
+  if (v === "hoax" || v === "hoaks") return "Hoaks";
+  if (v === "fakta") return "Fakta";
+  return "Tidak diketahui";
+}
+
+// Memformat tanggal artikel evidence (format 'YYYY-MM-DD' dari backend) menjadi
+// format singkat berbahasa Indonesia; fallback ke teks mentah bila tidak valid.
+function formatEvidenceDate(rawDate) {
+  const raw = String(rawDate || "").trim();
+  if (!raw) return "";
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return raw;
+  return parsed.toLocaleDateString("id-ID", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+// Merender daftar artikel cek-fakta TurnBackHoax yang mirip dengan teks yang
+// dianalisis (payload.document.evidence_matches). Otomatis tersembunyi bila
+// backend tidak mengembalikan field ini sama sekali (mis. RAG belum aktif)
+// atau memang tidak ada artikel yang cukup mirip -- tidak pernah error.
+function renderEvidence(payload) {
+  if (!evidenceSection || !evidenceList) return;
+
+  const items = Array.isArray(payload?.document?.evidence_matches)
+    ? payload.document.evidence_matches
+    : [];
+
+  evidenceList.innerHTML = "";
+
+  if (items.length === 0) {
+    evidenceSection.classList.add("hidden");
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+  items.forEach((item) => {
+    const title = String(item?.title || "").trim() || "Artikel tanpa judul";
+    const url = String(item?.url || "").trim();
+    const date = formatEvidenceDate(item?.date);
+    const similarity = Number(item?.similarity);
+
+    const li = document.createElement("li");
+    li.className = "evidence-item";
+
+    const main = document.createElement("div");
+    main.className = "evidence-item__main";
+
+    const link = document.createElement("a");
+    link.className = "evidence-item__title";
+    link.textContent = title;
+    if (url) {
+      link.href = url;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+    }
+    main.appendChild(link);
+
+    const meta = document.createElement("div");
+    meta.className = "evidence-item__meta";
+    if (date) {
+      const dateSpan = document.createElement("span");
+      dateSpan.textContent = date;
+      meta.appendChild(dateSpan);
+    }
+    if (Number.isFinite(similarity)) {
+      const simSpan = document.createElement("span");
+      simSpan.textContent = `Kemiripan ${formatPercent(similarity)}`;
+      meta.appendChild(simSpan);
+    }
+    main.appendChild(meta);
+
+    const badge = document.createElement("span");
+    badge.className = `confidence-badge evidence-item__badge ${evidenceBadgeClass(item?.verdict)}`;
+    badge.textContent = evidenceBadgeText(item?.verdict);
+
+    li.appendChild(main);
+    li.appendChild(badge);
+    fragment.appendChild(li);
+  });
+
+  evidenceList.appendChild(fragment);
+  evidenceSection.classList.remove("hidden");
 }
 
 // Melakukan fetch dengan pembatalan otomatis (AbortController) jika melebihi batas waktu
@@ -846,6 +950,7 @@ async function handleDetect() {
       topicPerParagraph,
     );
     renderVerdict(payload);
+    renderEvidence(payload);
 
     const paragraphs = extractParagraphs(payload, textToSend);
     const sm = renderOutput(

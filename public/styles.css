@@ -386,6 +386,71 @@ button:disabled {
   margin: 1rem 0 0.9rem;
 }
 
+/* ── Evidence Section (artikel cek-fakta TurnBackHoax terkait) ── */
+.evidence-section {
+  margin-top: 0.9rem;
+}
+
+.evidence-heading {
+  margin: 0 0 0.55rem;
+  font-size: 0.86rem;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.evidence-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.evidence-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.62rem 0.78rem;
+  background: #f7fbf9;
+}
+
+.evidence-item__main {
+  min-width: 0;
+}
+
+.evidence-item__title {
+  display: block;
+  font-size: 0.87rem;
+  font-weight: 600;
+  color: var(--ink);
+  text-decoration: none;
+  line-height: 1.42;
+}
+
+.evidence-item__title:hover {
+  color: var(--btn);
+  text-decoration: underline;
+}
+
+.evidence-item__meta {
+  margin-top: 0.32rem;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.evidence-item__badge {
+  flex-shrink: 0;
+}
+
 /* ── Global Summary ── */
 .global-summary {
   margin: 0 0 0.8rem;

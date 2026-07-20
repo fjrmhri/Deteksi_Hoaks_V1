@@ -109,6 +109,15 @@
           <div id="verdictTopic" class="verdict-topic hidden"></div>
         </div>
 
+        <!-- Daftar artikel cek-fakta TurnBackHoax yang paling mirip dengan teks
+             yang dianalisis (evidence retrieval / RAG). Diisi dinamis oleh app.js,
+             tersembunyi otomatis bila backend tidak mengembalikan evidence_matches
+             (mis. RAG belum aktif di backend, atau tidak ada artikel yang cukup mirip). -->
+        <section id="evidenceSection" class="evidence-section hidden">
+          <h3 class="evidence-heading">Artikel Cek Fakta Terkait (TurnBackHoax)</h3>
+          <ul id="evidenceList" class="evidence-list"></ul>
+        </section>
+
         <div class="section-divider"></div>
 
         <h2>Hasil Highlight Inline</h2>

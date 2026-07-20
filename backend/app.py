@@ -26,6 +26,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
+# Modul evidence retrieval (RAG) dari TurnBackHoax.id -- terpisah dari file ini,
+# tidak mengubah bobot IndoBERT/BERTopic sama sekali (lihat rag.py).
+from rag import RAG_ENABLED, start_rag_background_update, retrieve_evidence, rag_status
+
 
 # ==== Konfigurasi lingkungan (environment variables) ====
 # Semua nilai berikut bisa dioverride lewat environment variable saat deploy,
@@ -509,6 +513,13 @@ class PredictRequest(BaseModel):
 class BatchPredictRequest(BaseModel):
     texts: List[str]
 
+class EvidenceItem(BaseModel):
+    title: str
+    url: str
+    verdict: str
+    date: str
+    similarity: float
+
 class PredictResponse(BaseModel):
     label: str
     score: float
@@ -517,6 +528,7 @@ class PredictResponse(BaseModel):
     hoax_probability: float
     risk_level: str
     risk_explanation: str
+    evidence_matches: List[EvidenceItem] = []
 
 class BatchPredictResponse(BaseModel):
     results: List[PredictResponse]
@@ -542,6 +554,7 @@ class DocumentAnalysis(BaseModel):
     risk_explanation: str
     sentence_aggregate_label: str
     summary: DocumentSummary
+    evidence_matches: List[EvidenceItem] = []
 
 class TopicInfo(BaseModel):
     label: str
@@ -805,6 +818,23 @@ def _st_encode(texts: List[str], embedder) -> np.ndarray:
     )
 
 
+# ==== Fungsi jembatan: embedding untuk RAG memakai ulang SentenceTransformer
+# yang sama dengan BERTopic (tidak perlu load model baru) ====
+def _rag_embed_texts(texts: List[str]) -> np.ndarray:
+    _, embedder = _get_bertopic_components()
+    if embedder is None:
+        # BERTopic/embedder belum selesai dimuat di background -- RAG akan
+        # otomatis mencoba lagi pada siklus update/berikutnya.
+        raise RuntimeError("Embedder BERTopic belum siap, coba lagi nanti.")
+    return _st_encode(texts, embedder)
+
+
+# Memulai thread background untuk RAG (no-op bila RAG_ENABLED=0 di environment).
+# Index lama (jika ada di disk) langsung dimuat & siap dipakai; crawl artikel
+# baru dari TurnBackHoax berjalan berkala tanpa memblokir startup API.
+start_rag_background_update(_rag_embed_texts)
+
+
 # ==== Fungsi inferensi topik per paragraf (gabungan rule-based & BERTopic) ====
 def _infer_topic_per_paragraf(texts: List[str]) -> List[TopicInfo]:
     rule_results: List[Optional[Tuple[str, float]]] = [
@@ -846,7 +876,11 @@ def _infer_topic_per_paragraf(texts: List[str]) -> List[TopicInfo]:
 
 
 # ==== Fungsi pembentuk response prediksi tunggal (label, skor, level risiko) ====
-def _build_predict_response(prob_dict: Dict[str, float], original_text: str) -> PredictResponse:
+def _build_predict_response(
+    prob_dict: Dict[str, float],
+    original_text: str,
+    evidence_matches: Optional[List[Dict[str, Any]]] = None,
+) -> PredictResponse:
     p_hoax = _extract_hoax_probability(prob_dict)
     p_not_hoax = _extract_not_hoax_probability(prob_dict, p_hoax)
     label = _to_canonical_label(p_hoax, teks=original_text)
@@ -864,7 +898,20 @@ def _build_predict_response(prob_dict: Dict[str, float], original_text: str) -> 
         hoax_probability=_round6(p_hoax),
         risk_level=risk_level,
         risk_explanation=risk_explanation,
+        evidence_matches=[EvidenceItem(**e) for e in (evidence_matches or [])],
     )
+
+
+# ==== Fungsi bantu: ambil evidence TurnBackHoax dengan aman (tidak pernah
+# melempar exception ke endpoint pemanggil, sesuai pola fallback BERTopic) ====
+def _safe_retrieve_evidence(text: str) -> List[Dict[str, Any]]:
+    if not RAG_ENABLED:
+        return []
+    try:
+        return retrieve_evidence(text, _rag_embed_texts)
+    except Exception as e:
+        print(f"[WARN] Evidence retrieval gagal, lanjut tanpa evidence: {e}")
+        return []
 
 
 # ==== Fungsi logging sampel hasil prediksi (aktif hanya jika ENABLE_LOGGING=1) ====
@@ -941,13 +988,14 @@ def read_root():
         "bertopic_embed_model": BERTOPIC_EMBED_MODEL_ID,
         "topic_model": "bertopic+rule-based",
         "kategori": [nama for nama, _ in PETA_KATEGORI],
+        "rag_evidence": rag_status(),
     }
 
 
-# ==== Endpoint health check: memastikan API & status BERTopic siap diakses ====
+# ==== Endpoint health check: memastikan API & status BERTopic/RAG siap diakses ====
 @app.get("/health")
 def health_check():
-    return {"status": "ok", "bertopic_ready": _bertopic_ready}
+    return {"status": "ok", "bertopic_ready": _bertopic_ready, "rag_evidence": rag_status()}
 
 
 # ==== Endpoint prediksi hoaks untuk satu teks tunggal ====
@@ -961,7 +1009,10 @@ def predict(request: PredictRequest):
             hoax_probability=0.0, risk_level="low",
             risk_explanation="Teks kosong.",
         )
-    response = _build_predict_response(prob_list[0], original_text=str(original_text))
+    evidence = _safe_retrieve_evidence(str(original_text))
+    response = _build_predict_response(
+        prob_list[0], original_text=str(original_text), evidence_matches=evidence,
+    )
     _maybe_log({"route": "/predict", "label": response.label, "p_hoax": response.hoax_probability})
     return response
 
@@ -1041,6 +1092,7 @@ def analyze(request: AnalyzeRequest):
     sentence_aggregate_label = doc_label
 
     risk_level, risk_explanation = analyze_risk(p_hoax_doc, original_text=original_text)
+    evidence = _safe_retrieve_evidence(original_text)
 
     per_paragraph_topics = _infer_topic_per_paragraf(paragraph_texts)
 
@@ -1112,6 +1164,7 @@ def analyze(request: AnalyzeRequest):
                 hoax_sentence_count=hoax_sentence_count,
                 not_hoax_sentence_count=not_hoax_sentence_count,
             ),
+            evidence_matches=[EvidenceItem(**e) for e in evidence],
         ),
         paragraphs=paragraphs,
         shared_topics=shared_topics,

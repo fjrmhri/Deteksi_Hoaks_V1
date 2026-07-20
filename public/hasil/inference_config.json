@@ -1,5 +1,5 @@
 {
-  "threshold_optimal": 0.47000000000000014,
+  "threshold_optimal": 0.4100000000000001,
   "threshold_default": 0.5,
   "metric_for_best_model": "f1",
   "model_name": "indolem/indobert-base-uncased",
@@ -12,7 +12,7 @@
     "0": "not_hoax",
     "1": "hoax"
   },
-  "transformers_version": "5.12.1",
+  "transformers_version": "5.13.1",
   "torch_version": "2.11.0+cu128",
-  "training_date": "2026-07-03"
+  "training_date": "2026-07-20"
 }
