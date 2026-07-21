@@ -12,3 +12,4 @@ sentence-transformers
 umap-learn
 hdbscan
 requests
+beautifulsoup4
