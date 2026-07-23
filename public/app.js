@@ -95,6 +95,8 @@ const verdictConf = document.getElementById("verdictConf");
 const verdictTopic = document.getElementById("verdictTopic");
 const evidenceSection = document.getElementById("evidenceSection");
 const evidenceList = document.getElementById("evidenceList");
+const narrativeSection = document.getElementById("narrativeSection");
+const narrativeText = document.getElementById("narrativeText");
 const globalSummary = document.getElementById("globalSummary");
 const outputParagraphs = document.getElementById("outputParagraphs");
 const confidenceDetails = document.getElementById("confidenceDetails");
@@ -347,6 +349,8 @@ function resetOutput() {
   if (verdictTopic) verdictTopic.classList.add("hidden");
   if (evidenceSection) evidenceSection.classList.add("hidden");
   if (evidenceList) evidenceList.innerHTML = "";
+  if (narrativeSection) narrativeSection.classList.add("hidden");
+  if (narrativeText) narrativeText.textContent = "";
   if (confidenceList) confidenceList.innerHTML = "";
   if (confidenceSummary)
     confidenceSummary.textContent = "Rincian Keyakinan per Kalimat";
@@ -487,6 +491,28 @@ function renderEvidence(payload) {
 
   evidenceList.appendChild(fragment);
   evidenceSection.classList.remove("hidden");
+}
+
+// Merender narasi penjelasan singkat hasil generation (Gemini API) berbasis evidence
+// (payload.document.narrative_explanation). Otomatis tersembunyi bila backend tidak
+// mengembalikan field ini sama sekali (mis. GENERATION_ENABLED=0 di backend, evidence
+// kosong, atau pemanggilan API generation gagal/timeout) -- tidak pernah dianggap
+// error, karena fitur ini murni tambahan di atas evidence retrieval.
+function renderNarrative(payload) {
+  if (!narrativeSection || !narrativeText) return;
+
+  const narrative = String(
+    payload?.document?.narrative_explanation || "",
+  ).trim();
+
+  if (!narrative) {
+    narrativeSection.classList.add("hidden");
+    narrativeText.textContent = "";
+    return;
+  }
+
+  narrativeText.textContent = narrative;
+  narrativeSection.classList.remove("hidden");
 }
 
 // Melakukan fetch dengan pembatalan otomatis (AbortController) jika melebihi batas waktu
@@ -951,6 +977,7 @@ async function handleDetect() {
     );
     renderVerdict(payload);
     renderEvidence(payload);
+    renderNarrative(payload);
 
     const paragraphs = extractParagraphs(payload, textToSend);
     const sm = renderOutput(

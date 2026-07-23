@@ -451,6 +451,46 @@ button:disabled {
   flex-shrink: 0;
 }
 
+/* ── Narrative Section (ringkasan penjelasan hasil generation Gemini) ── */
+.narrative-section {
+  margin-top: 0.9rem;
+  padding: 0.85rem 1rem;
+  border-radius: 12px;
+  border: 1px solid #cfe0da;
+  background: linear-gradient(135deg, #f2faf7 0%, #eef3ff 100%);
+}
+
+.narrative-heading {
+  margin: 0 0 0.42rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.86rem;
+  font-weight: 700;
+  color: var(--btn-hover);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.narrative-heading__icon {
+  font-size: 0.92rem;
+  line-height: 1;
+}
+
+.narrative-text {
+  margin: 0;
+  font-size: 0.93rem;
+  line-height: 1.62;
+  color: var(--ink);
+}
+
+.narrative-disclaimer {
+  margin: 0.55rem 0 0;
+  font-size: 0.74rem;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
 /* ── Global Summary ── */
 .global-summary {
   margin: 0 0 0.8rem;
