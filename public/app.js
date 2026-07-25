@@ -411,6 +411,23 @@ function evidenceBadgeText(verdict) {
   return "Tidak diketahui";
 }
 
+// Menerjemahkan provenance evidence (field "source" dari backend: "api"/"scrape")
+// jadi label yang mudah dibaca pengguna. String kosong berarti data lama/tidak diketahui,
+// sehingga tag ini otomatis tidak dirender (lihat renderEvidence).
+function evidenceSourceLabel(source) {
+  const s = String(source || "").toLowerCase();
+  if (s === "api") return "MAFINDO API";
+  if (s === "scrape") return "Scraping TurnBackHoax";
+  return "";
+}
+
+function evidenceSourceClass(source) {
+  const s = String(source || "").toLowerCase();
+  if (s === "api") return "evidence-item__tag--source-api";
+  if (s === "scrape") return "evidence-item__tag--source-scrape";
+  return "";
+}
+
 // Memformat tanggal artikel evidence (format 'YYYY-MM-DD' dari backend) menjadi
 // format singkat berbahasa Indonesia; fallback ke teks mentah bila tidak valid.
 function formatEvidenceDate(rawDate) {
@@ -479,6 +496,30 @@ function renderEvidence(payload) {
       meta.appendChild(simSpan);
     }
     main.appendChild(meta);
+
+    // Baris tag tambahan: sumber evidence (API/scraping) & klasifikasi khusus MAFINDO.
+    // Classification hanya terisi utk evidence dari API -- otomatis tak muncul utk hasil scraping.
+    const sourceLabel = evidenceSourceLabel(item?.source);
+    const classification = String(item?.classification || "").trim();
+    if (sourceLabel || classification) {
+      const tags = document.createElement("div");
+      tags.className = "evidence-item__tags";
+
+      if (sourceLabel) {
+        const sourceTag = document.createElement("span");
+        sourceTag.className = `evidence-item__tag ${evidenceSourceClass(item?.source)}`;
+        sourceTag.textContent = sourceLabel;
+        tags.appendChild(sourceTag);
+      }
+      if (classification) {
+        const classTag = document.createElement("span");
+        classTag.className =
+          "evidence-item__tag evidence-item__tag--classification";
+        classTag.textContent = classification;
+        tags.appendChild(classTag);
+      }
+      main.appendChild(tags);
+    }
 
     const badge = document.createElement("span");
     badge.className = `confidence-badge evidence-item__badge ${evidenceBadgeClass(item?.verdict)}`;

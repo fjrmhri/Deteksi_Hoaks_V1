@@ -451,6 +451,46 @@ button:disabled {
   flex-shrink: 0;
 }
 
+.evidence-item__tags {
+  margin-top: 0.4rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.evidence-item__tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+/* Tag provenance: dari API resmi MAFINDO */
+.evidence-item__tag--source-api {
+  background: var(--bg-2);
+  color: #33499c;
+}
+
+/* Tag provenance: dari hasil scraping TurnBackHoax */
+.evidence-item__tag--source-scrape {
+  background: #eaf5ee;
+  color: var(--btn-hover);
+}
+
+/* Tag klasifikasi khusus MAFINDO (mis. "Misleading Content") -- gaya netral/outline
+   karena ini info deskriptif tambahan, bukan kategori berwarna seperti verdict */
+.evidence-item__tag--classification {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-weight: 500;
+}
+
 /* ── Narrative Section (ringkasan penjelasan hasil generation Gemini) ── */
 .narrative-section {
   margin-top: 0.9rem;
