@@ -44,12 +44,20 @@
 
         <div class="action-row">
           <button id="detectBtn" type="button" class="btn btn-primary">
-            <span id="detectLabel">Deteksi</span>
+            <span id="detectLabel">Analisis Sekarang</span>
             <span
               id="detectSpinner"
               class="spinner hidden"
               aria-hidden="true"
             ></span>
+          </button>
+          <button
+            id="rapikanBtn"
+            type="button"
+            class="btn btn-secondary"
+            title="Gabungkan baris terputus akibat copy-paste menjadi paragraf yang mengalir"
+          >
+            ✦ Rapikan
           </button>
           <button id="resetBtn" type="button" class="btn btn-secondary">
             Reset
@@ -122,9 +130,6 @@
              mengembalikan evidence_matches (mis. RAG belum aktif di backend, atau
              tidak ada artikel yang cukup mirip). -->
         <section id="evidenceSection" class="evidence-section hidden">
-          <h3 class="evidence-heading">
-            Artikel Cek Fakta Terkait (Mafindo Antihoax)
-          </h3>
           <!-- Indikator sekunder jumlah artikel referensi RAG tersimpan di backend.
                Diisi & ditampilkan oleh app.js hanya bila RAG aktif & fetch /health berhasil. -->
           <p id="ragArticleCount" class="rag-article-count hidden"></p>
