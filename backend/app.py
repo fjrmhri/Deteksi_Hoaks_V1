@@ -26,7 +26,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
-# Modul evidence retrieval (RAG) dari TurnBackHoax.id -- terpisah dari file ini,
+# Modul evidence retrieval (RAG) dari API resmi Mafindo Antihoax
+# (yudistira.turnbackhoax.id) -- terpisah dari file ini,
 # tidak mengubah bobot IndoBERT/BERTopic sama sekali (lihat rag.py).
 from rag import RAG_ENABLED, start_rag_background_update, retrieve_evidence, rag_status
 
@@ -838,8 +839,8 @@ def _rag_embed_texts(texts: List[str]) -> np.ndarray:
 
 
 # Memulai thread background untuk RAG (no-op bila RAG_ENABLED=0 di environment).
-# Index lama (jika ada di disk) langsung dimuat & siap dipakai; crawl artikel
-# baru dari TurnBackHoax berjalan berkala tanpa memblokir startup API.
+# Index lama (jika ada di disk) langsung dimuat & siap dipakai; fetch artikel
+# baru dari API Mafindo Antihoax berjalan berkala tanpa memblokir startup API.
 start_rag_background_update(_rag_embed_texts)
 
 
@@ -884,7 +885,7 @@ def _infer_topic_per_paragraf(texts: List[str]) -> List[TopicInfo]:
 
 
 # ==== Fungsi rekonsiliasi verdict akhir antara IndoBERT & RAG ====
-# RAG (evidence TurnBackHoax/Mafindo) diperlakukan sebagai ground truth untuk
+# RAG (evidence dari API Mafindo Antihoax) diperlakukan sebagai ground truth untuk
 # hoax yang SUDAH diverifikasi sebelumnya ("known threat"): jika artikel bukti
 # paling mirip (item pertama hasil retrieve_evidence, sudah terurut similarity
 # tertinggi) melewati ambang similarity tinggi DAN berlabel "hoax", padahal
@@ -956,7 +957,7 @@ def _build_predict_response(
     )
 
 
-# ==== Fungsi bantu: ambil evidence TurnBackHoax dengan aman (tidak pernah
+# ==== Fungsi bantu: ambil evidence Mafindo Antihoax dengan aman (tidak pernah
 # melempar exception ke endpoint pemanggil, sesuai pola fallback BERTopic) ====
 def _safe_retrieve_evidence(text: str) -> List[Dict[str, Any]]:
     if not RAG_ENABLED:
