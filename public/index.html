@@ -113,28 +113,14 @@
              yang dianalisis (evidence retrieval / RAG). Diisi dinamis oleh app.js,
              tersembunyi otomatis bila backend tidak mengembalikan evidence_matches
              (mis. RAG belum aktif di backend, atau tidak ada artikel yang cukup mirip). -->
-        <!-- Sumber evidence bisa dari scraping TurnBackHoax dan/atau MAFINDO API --
-             provenance tiap artikel ditampilkan sebagai tag kecil per-kartu oleh app.js. -->
         <section id="evidenceSection" class="evidence-section hidden">
-          <h3 class="evidence-heading">Artikel Cek Fakta Terkait</h3>
-          <ul id="evidenceList" class="evidence-list"></ul>
-        </section>
-
-        <!-- Narasi penjelasan singkat hasil generation (Gemini API) berbasis evidence
-             di atas. Diisi dinamis oleh app.js, tersembunyi otomatis bila backend
-             tidak mengembalikan narrative_explanation (mis. GENERATION_ENABLED=0 di
-             backend, evidence kosong, atau API generation gagal/timeout) -- fitur ini
-             murni aditif dan tidak pernah memengaruhi verdict/label klasifikasi. -->
-        <section id="narrativeSection" class="narrative-section hidden">
-          <h3 class="narrative-heading">
-            <span class="narrative-heading__icon" aria-hidden="true">✦</span>
-            Ringkasan Penjelasan
+          <h3 class="evidence-heading">
+            Artikel Cek Fakta Terkait (TurnBackHoax)
           </h3>
-          <p id="narrativeText" class="narrative-text"></p>
-          <p class="narrative-disclaimer">
-            Disusun otomatis oleh AI berdasarkan artikel cek-fakta di atas,
-            bukan bagian dari keputusan klasifikasi model.
-          </p>
+          <!-- Indikator sekunder jumlah artikel referensi RAG tersimpan di backend.
+               Diisi & ditampilkan oleh app.js hanya bila RAG aktif & fetch /health berhasil. -->
+          <p id="ragArticleCount" class="rag-article-count hidden"></p>
+          <ul id="evidenceList" class="evidence-list"></ul>
         </section>
 
         <div class="section-divider"></div>

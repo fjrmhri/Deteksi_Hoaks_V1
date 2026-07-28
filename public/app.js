@@ -95,8 +95,7 @@ const verdictConf = document.getElementById("verdictConf");
 const verdictTopic = document.getElementById("verdictTopic");
 const evidenceSection = document.getElementById("evidenceSection");
 const evidenceList = document.getElementById("evidenceList");
-const narrativeSection = document.getElementById("narrativeSection");
-const narrativeText = document.getElementById("narrativeText");
+const ragArticleCount = document.getElementById("ragArticleCount");
 const globalSummary = document.getElementById("globalSummary");
 const outputParagraphs = document.getElementById("outputParagraphs");
 const confidenceDetails = document.getElementById("confidenceDetails");
@@ -349,8 +348,6 @@ function resetOutput() {
   if (verdictTopic) verdictTopic.classList.add("hidden");
   if (evidenceSection) evidenceSection.classList.add("hidden");
   if (evidenceList) evidenceList.innerHTML = "";
-  if (narrativeSection) narrativeSection.classList.add("hidden");
-  if (narrativeText) narrativeText.textContent = "";
   if (confidenceList) confidenceList.innerHTML = "";
   if (confidenceSummary)
     confidenceSummary.textContent = "Rincian Keyakinan per Kalimat";
@@ -409,23 +406,6 @@ function evidenceBadgeText(verdict) {
   if (v === "hoax" || v === "hoaks") return "Hoaks";
   if (v === "fakta") return "Fakta";
   return "Tidak diketahui";
-}
-
-// Menerjemahkan provenance evidence (field "source" dari backend: "api"/"scrape")
-// jadi label yang mudah dibaca pengguna. String kosong berarti data lama/tidak diketahui,
-// sehingga tag ini otomatis tidak dirender (lihat renderEvidence).
-function evidenceSourceLabel(source) {
-  const s = String(source || "").toLowerCase();
-  if (s === "api") return "MAFINDO API";
-  if (s === "scrape") return "Scraping TurnBackHoax";
-  return "";
-}
-
-function evidenceSourceClass(source) {
-  const s = String(source || "").toLowerCase();
-  if (s === "api") return "evidence-item__tag--source-api";
-  if (s === "scrape") return "evidence-item__tag--source-scrape";
-  return "";
 }
 
 // Memformat tanggal artikel evidence (format 'YYYY-MM-DD' dari backend) menjadi
@@ -497,30 +477,6 @@ function renderEvidence(payload) {
     }
     main.appendChild(meta);
 
-    // Baris tag tambahan: sumber evidence (API/scraping) & klasifikasi khusus MAFINDO.
-    // Classification hanya terisi utk evidence dari API -- otomatis tak muncul utk hasil scraping.
-    const sourceLabel = evidenceSourceLabel(item?.source);
-    const classification = String(item?.classification || "").trim();
-    if (sourceLabel || classification) {
-      const tags = document.createElement("div");
-      tags.className = "evidence-item__tags";
-
-      if (sourceLabel) {
-        const sourceTag = document.createElement("span");
-        sourceTag.className = `evidence-item__tag ${evidenceSourceClass(item?.source)}`;
-        sourceTag.textContent = sourceLabel;
-        tags.appendChild(sourceTag);
-      }
-      if (classification) {
-        const classTag = document.createElement("span");
-        classTag.className =
-          "evidence-item__tag evidence-item__tag--classification";
-        classTag.textContent = classification;
-        tags.appendChild(classTag);
-      }
-      main.appendChild(tags);
-    }
-
     const badge = document.createElement("span");
     badge.className = `confidence-badge evidence-item__badge ${evidenceBadgeClass(item?.verdict)}`;
     badge.textContent = evidenceBadgeText(item?.verdict);
@@ -532,28 +488,6 @@ function renderEvidence(payload) {
 
   evidenceList.appendChild(fragment);
   evidenceSection.classList.remove("hidden");
-}
-
-// Merender narasi penjelasan singkat hasil generation (Gemini API) berbasis evidence
-// (payload.document.narrative_explanation). Otomatis tersembunyi bila backend tidak
-// mengembalikan field ini sama sekali (mis. GENERATION_ENABLED=0 di backend, evidence
-// kosong, atau pemanggilan API generation gagal/timeout) -- tidak pernah dianggap
-// error, karena fitur ini murni tambahan di atas evidence retrieval.
-function renderNarrative(payload) {
-  if (!narrativeSection || !narrativeText) return;
-
-  const narrative = String(
-    payload?.document?.narrative_explanation || "",
-  ).trim();
-
-  if (!narrative) {
-    narrativeSection.classList.add("hidden");
-    narrativeText.textContent = "";
-    return;
-  }
-
-  narrativeText.textContent = narrative;
-  narrativeSection.classList.remove("hidden");
 }
 
 // Melakukan fetch dengan pembatalan otomatis (AbortController) jika melebihi batas waktu
@@ -612,6 +546,28 @@ async function callAnalyzeApi(text, sentenceLevel, topicPerParagraph) {
       );
     }
     throw err;
+  }
+}
+
+// ==== Indikator sekunder: jumlah artikel referensi RAG tersimpan di backend ====
+// Mengambil rag_evidence.n_articles dari endpoint /health. Ini hanya indikator
+// sekunder (bukan fitur utama), jadi kegagalan apa pun cukup menyembunyikan
+// elemen secara diam-diam -- tidak boleh memicu showError().
+async function loadRagArticleCount() {
+  if (!ragArticleCount || !apiBaseUrl) return;
+  try {
+    const response = await fetchWithTimeout(`${apiBaseUrl}/health`);
+    const payload = await response.json();
+    const ragEvidence = payload?.rag_evidence;
+    if (!response.ok || !ragEvidence || ragEvidence.enabled !== true) {
+      ragArticleCount.classList.add("hidden");
+      return;
+    }
+    const n = Number(ragEvidence.n_articles) || 0;
+    ragArticleCount.textContent = `Artikel referensi tersimpan: ${n}`;
+    ragArticleCount.classList.remove("hidden");
+  } catch (err) {
+    ragArticleCount.classList.add("hidden");
   }
 }
 
@@ -1018,7 +974,6 @@ async function handleDetect() {
     );
     renderVerdict(payload);
     renderEvidence(payload);
-    renderNarrative(payload);
 
     const paragraphs = extractParagraphs(payload, textToSend);
     const sm = renderOutput(
@@ -1053,3 +1008,6 @@ if (newsText) {
 
 // Inisialisasi awal: tampilkan statistik input begitu halaman selesai dimuat
 updateInputStats();
+
+// Inisialisasi awal: muat indikator jumlah artikel referensi RAG (sekunder, non-blocking)
+loadRagArticleCount();
