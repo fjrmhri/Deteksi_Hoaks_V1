@@ -77,6 +77,7 @@ const detectBtn = document.getElementById("detectBtn");
 const detectLabel = document.getElementById("detectLabel");
 const detectSpinner = document.getElementById("detectSpinner");
 const resetBtn = document.getElementById("resetBtn");
+const rapikanBtn = document.getElementById("rapikanBtn");
 const newsText = document.getElementById("newsText");
 const sentenceLevelToggle = document.getElementById("sentenceLevelToggle");
 const topicToggle = document.getElementById("topicToggle");
@@ -332,6 +333,7 @@ function setLoading(isLoading) {
   if (!detectBtn || !detectLabel || !detectSpinner) return;
   detectBtn.disabled = isLoading;
   if (resetBtn) resetBtn.disabled = isLoading;
+  if (rapikanBtn) rapikanBtn.disabled = isLoading;
   if (isLoading) {
     detectLabel.textContent = "Menganalisis…";
     detectSpinner.classList.remove("hidden");
@@ -416,14 +418,20 @@ function renderVerdict(payload) {
     }
   }
 
+  // Penjelasan model (risk_explanation) hanya ditampilkan saat verdict di-override
+  // oleh RAG -- untuk verdict normal IndoBERT, banner verdict di atas sudah cukup
+  // informatif dan penjelasan teks panjang justru redundan.
   if (verdictExplanation) {
-    const explanation = String(doc.risk_explanation || "").trim();
-    if (explanation) {
-      verdictExplanation.textContent = explanation;
-      verdictExplanation.className = isRagOverride
-        ? "verdict-explanation verdict-explanation--override"
-        : "verdict-explanation";
-      verdictExplanation.classList.remove("hidden");
+    if (isRagOverride) {
+      const explanation = String(doc.risk_explanation || "").trim();
+      if (explanation) {
+        verdictExplanation.textContent = explanation;
+        verdictExplanation.className =
+          "verdict-explanation verdict-explanation--override";
+        verdictExplanation.classList.remove("hidden");
+      } else {
+        verdictExplanation.classList.add("hidden");
+      }
     } else {
       verdictExplanation.classList.add("hidden");
     }
@@ -734,6 +742,13 @@ function buildFallbackParagraphs(backendParagraphs, inputText) {
       if (take > maxAllow) take = maxAllow;
       if (take <= 0 && maxAllow > 0) take = 1;
     }
+    // FIX Bug #1 (bagian A): lewati paragraf input yang tidak mendapat kalimat.
+    // Terjadi saat jumlah kalimat backend < jumlah paragraf input -- algoritma
+    // "reserve" memprioritaskan paragraf berikutnya sehingga paragraf awal
+    // mendapat take=0. Tanpa ini, paragraf tersebut dirender sebagai teks mentah
+    // tanpa highlight (via fallback `hl || escapeHtml(pText)`) dan tampak
+    // "mengulang" konten kalimat yang sudah muncul di blok lain.
+    if (take === 0) continue;
     const slice = sents
       .slice(cursor, cursor + take)
       .map((s, li) => ({ ...s, sentence_index: li }));
@@ -801,19 +816,34 @@ function renderOutput(payload, paragraphs, sentenceLevel, topicPerParagraph) {
   if (!outputSection || !outputParagraphs || !globalSummary) return null;
   outputParagraphs.innerHTML = "";
 
+  // FIX Bug #1 (bagian B): di mode sentence-level, filter paragraf yang
+  // sentences-nya kosong ([] atau undefined) sebelum dirender. Paragraf seperti
+  // ini muncul saat buildFallbackParagraphs memberi take=0 ke suatu paragraf --
+  // bila tidak difilter, teks mentah pText-nya dirender tanpa highlight dan
+  // tampak seolah "mengulang" konten kalimat yang sudah ada di blok lain.
+  // Filter ini juga menyelaraskan ringkasan global (kalimat/paragraf) agar
+  // tidak menghitung paragraf yang tidak punya kontribusi ke total kalimat.
+  const effectiveParagraphs = sentenceLevel
+    ? (Array.isArray(paragraphs) ? paragraphs : []).filter(
+        (p) => Array.isArray(p?.sentences) && p.sentences.length > 0,
+      )
+    : Array.isArray(paragraphs)
+      ? paragraphs
+      : [];
+
   const mode = sentenceLevel ? "sentence" : "paragraph";
-  const sm = buildSummaryModel(paragraphs, mode);
+  const sm = buildSummaryModel(effectiveParagraphs, mode);
 
   globalSummary.innerHTML = buildSummaryMarkup(sm);
 
-  if (paragraphs.length === 0) {
+  if (effectiveParagraphs.length === 0) {
     outputParagraphs.innerHTML =
       '<p class="paragraph-meta">Tidak ada paragraf yang bisa ditampilkan.</p>';
     outputSection.classList.remove("hidden");
     return sm;
   }
 
-  const sorted = sortByIndex(paragraphs, "paragraph_index");
+  const sorted = sortByIndex(effectiveParagraphs, "paragraph_index");
   const fragment = document.createDocumentFragment();
 
   sorted.forEach((paragraph, index) => {
@@ -868,8 +898,18 @@ function renderOutput(payload, paragraphs, sentenceLevel, topicPerParagraph) {
 function renderConfidence(paragraphs, sentenceLevel, sm) {
   if (!confidenceDetails || !confidenceSummary || !confidenceList) return;
 
+  // Sinkronkan dengan filter yang sama di renderOutput agar panel rincian
+  // dan ringkasan global menampilkan jumlah yang konsisten.
+  const effectiveParagraphs = sentenceLevel
+    ? (Array.isArray(paragraphs) ? paragraphs : []).filter(
+        (p) => Array.isArray(p?.sentences) && p.sentences.length > 0,
+      )
+    : Array.isArray(paragraphs)
+      ? paragraphs
+      : [];
+
   const mode = sentenceLevel ? "sentence" : "paragraph";
-  const summaryModel = sm || buildSummaryModel(paragraphs, mode);
+  const summaryModel = sm || buildSummaryModel(effectiveParagraphs, mode);
 
   if (sentenceLevel) {
     confidenceSummary.textContent = `Rincian Keyakinan · ${summaryModel.total_s} kalimat`;
@@ -878,7 +918,7 @@ function renderConfidence(paragraphs, sentenceLevel, sm) {
   }
 
   confidenceList.innerHTML = "";
-  const sorted = sortByIndex(paragraphs, "paragraph_index");
+  const sorted = sortByIndex(effectiveParagraphs, "paragraph_index");
   const fragment = document.createDocumentFragment();
 
   if (sentenceLevel) {
@@ -1008,6 +1048,36 @@ function handleReset() {
   if (newsText) newsText.focus();
 }
 
+// Handler tombol "Rapikan": merapikan teks yang tidak rapi akibat copy-paste.
+// Masalah umum: berita yang seharusnya 1 paragraf menjadi banyak baris karena
+// soft-newline dari sumber asli (WhatsApp, PDF, situs berita) ikut tersalin.
+// Strategi: pisahkan blok berdasarkan baris kosong (paragraph break yang
+// disengaja), lalu dalam tiap blok gabungkan semua baris menjadi satu kalimat
+// mengalir (hilangkan soft-newline di tengah paragraf).
+function handleRapikan() {
+  if (!newsText) return;
+  const raw = newsText.value;
+  if (!raw.trim()) return;
+
+  const n = normalizeNewlines(raw);
+
+  // Pisah berdasarkan baris kosong (paragraph break yang disengaja pengguna)
+  const blocks = n.split(/\n[ \t]*\n+/);
+
+  const cleaned = blocks
+    .map((block) =>
+      block
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0)
+        .join(" "), // gabung baris dalam satu blok jadi satu aliran
+    )
+    .filter((block) => block.trim().length > 0);
+
+  newsText.value = cleaned.join("\n\n");
+  updateInputStats();
+}
+
 // Handler tombol deteksi: memvalidasi input, memanggil backend, lalu merender seluruh hasil
 async function handleDetect() {
   clearError();
@@ -1055,6 +1125,7 @@ async function handleDetect() {
 // ==== Pendaftaran event listener utama (tombol aksi & input teks) ====
 if (detectBtn) detectBtn.addEventListener("click", handleDetect);
 if (resetBtn) resetBtn.addEventListener("click", handleReset);
+if (rapikanBtn) rapikanBtn.addEventListener("click", handleRapikan);
 
 if (newsText) {
   newsText.addEventListener("input", updateInputStats);
