@@ -49,6 +49,12 @@ MIN_KATA_KALIMAT      = int(os.getenv("MIN_KATA_KALIMAT", "8"))
 THRESH_KALIMAT_PENDEK = float(os.getenv("THRESH_KALIMAT_PENDEK", "0.70"))
 
 
+# Ambang similarity RAG untuk override verdict IndoBERT. RAG diperlakukan sebagai
+# penentu kebenaran mutlak untuk hoax yang sudah diverifikasi ("known threats"),
+# sedangkan IndoBERT tetap jadi detektor utama untuk hoax baru ("zero-day hoax").
+RAG_OVERRIDE_SIM_THRESHOLD = float(os.getenv("RAG_OVERRIDE_SIM_THRESHOLD", "0.70"))
+
+
 # Ukuran batch untuk proses prediksi & embedding, memengaruhi kecepatan inferensi
 PREDICT_BATCH_SIZE   = int(os.getenv("PREDICT_BATCH_SIZE", "64"))
 SENTENCE_BATCH_SIZE  = int(os.getenv("SENTENCE_BATCH_SIZE", "64"))
@@ -528,6 +534,7 @@ class PredictResponse(BaseModel):
     hoax_probability: float
     risk_level: str
     risk_explanation: str
+    verdict_source: str = "model"  # "model" (IndoBERT) atau "rag_override" (evidence RAG)
     evidence_matches: List[EvidenceItem] = []
 
 class BatchPredictResponse(BaseModel):
@@ -553,6 +560,7 @@ class DocumentAnalysis(BaseModel):
     risk_level: str
     risk_explanation: str
     sentence_aggregate_label: str
+    verdict_source: str = "model"  # "model" (IndoBERT) atau "rag_override" (evidence RAG)
     summary: DocumentSummary
     evidence_matches: List[EvidenceItem] = []
 
@@ -875,6 +883,38 @@ def _infer_topic_per_paragraf(texts: List[str]) -> List[TopicInfo]:
     return final
 
 
+# ==== Fungsi rekonsiliasi verdict akhir antara IndoBERT & RAG ====
+# RAG (evidence TurnBackHoax/Mafindo) diperlakukan sebagai ground truth untuk
+# hoax yang SUDAH diverifikasi sebelumnya ("known threat"): jika artikel bukti
+# paling mirip (item pertama hasil retrieve_evidence, sudah terurut similarity
+# tertinggi) melewati ambang similarity tinggi DAN berlabel "hoax", padahal
+# IndoBERT memprediksi "not_hoax", verdict akhir di-override jadi "hoax".
+# IndoBERT tetap jadi penentu utama untuk kasus lain (termasuk hoax baru/zero-day
+# yang belum ada di index RAG).
+def _reconcile_verdict_with_rag(
+    label: str,
+    score: float,
+    evidence_matches: List[Dict[str, Any]],
+) -> Tuple[str, float, bool]:
+    if not evidence_matches:
+        return label, score, False
+
+    top_evidence = evidence_matches[0]  # sudah terurut similarity tertinggi -> terendah
+    top_similarity = float(top_evidence.get("similarity", 0.0))
+    top_verdict = top_evidence.get("verdict", "tidak diketahui")
+
+    if (
+        label == "not_hoax"
+        and top_verdict == "hoax"
+        and top_similarity > RAG_OVERRIDE_SIM_THRESHOLD
+    ):
+        # Override: pakai similarity RAG sebagai skor confidence verdict akhir,
+        # karena keputusan sekarang bersumber dari evidence, bukan dari IndoBERT.
+        return "hoax", top_similarity, True
+
+    return label, score, False
+
+
 # ==== Fungsi pembentuk response prediksi tunggal (label, skor, level risiko) ====
 def _build_predict_response(
     prob_dict: Dict[str, float],
@@ -885,8 +925,21 @@ def _build_predict_response(
     p_not_hoax = _extract_not_hoax_probability(prob_dict, p_hoax)
     label = _to_canonical_label(p_hoax, teks=original_text)
     score = p_hoax if label == "hoax" else p_not_hoax
+
+    evidence_list = evidence_matches or []
+    label, score, overridden = _reconcile_verdict_with_rag(label, score, evidence_list)
     confidence = _round6(score)
+
     risk_level, risk_explanation = analyze_risk(p_hoax, original_text=original_text)
+    verdict_source = "rag_override" if overridden else "model"
+    if overridden:
+        risk_level = "high"
+        risk_explanation = (
+            f"Verdict IndoBERT (\"Fakta\") di-override menjadi \"Hoaks\" karena RAG "
+            f"menemukan artikel cek-fakta yang sangat mirip (similarity {confidence:.2%}) "
+            "dan sudah berstatus hoaks terverifikasi. " + risk_explanation
+        )
+
     return PredictResponse(
         label=label,
         score=confidence,
@@ -898,7 +951,8 @@ def _build_predict_response(
         hoax_probability=_round6(p_hoax),
         risk_level=risk_level,
         risk_explanation=risk_explanation,
-        evidence_matches=[EvidenceItem(**e) for e in (evidence_matches or [])],
+        verdict_source=verdict_source,
+        evidence_matches=[EvidenceItem(**e) for e in evidence_list],
     )
 
 
@@ -1089,10 +1143,22 @@ def analyze(request: AnalyzeRequest):
     not_hoax_sentence_count = sum(1 for s in all_sentences_flat if s.label == "not_hoax")
 
     doc_label, p_hoax_doc, doc_conf = _aggregate_verdict(all_sentences_flat)
-    sentence_aggregate_label = doc_label
+    sentence_aggregate_label = doc_label  # aggregate mentah IndoBERT, tidak ikut di-override RAG
+
+    evidence = _safe_retrieve_evidence(original_text)
+    doc_label, doc_conf, doc_overridden = _reconcile_verdict_with_rag(
+        doc_label, doc_conf, evidence,
+    )
 
     risk_level, risk_explanation = analyze_risk(p_hoax_doc, original_text=original_text)
-    evidence = _safe_retrieve_evidence(original_text)
+    doc_verdict_source = "rag_override" if doc_overridden else "model"
+    if doc_overridden:
+        risk_level = "high"
+        risk_explanation = (
+            f"Verdict dokumen (\"Fakta\") di-override menjadi \"Hoaks\" karena RAG "
+            f"menemukan artikel cek-fakta yang sangat mirip (similarity {doc_conf:.2%}) "
+            "dan berstatus hoaks terverifikasi. " + risk_explanation
+        )
 
     per_paragraph_topics = _infer_topic_per_paragraf(paragraph_texts)
 
@@ -1158,6 +1224,7 @@ def analyze(request: AnalyzeRequest):
             risk_level=risk_level,
             risk_explanation=risk_explanation,
             sentence_aggregate_label=sentence_aggregate_label,
+            verdict_source=doc_verdict_source,
             summary=DocumentSummary(
                 paragraph_count=len(paragraphs),
                 sentence_count=hoax_sentence_count + not_hoax_sentence_count,

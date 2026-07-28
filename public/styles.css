@@ -358,6 +358,39 @@ button:disabled {
   margin-top: 2px;
 }
 
+/* ── Verdict Source Badge (muncul hanya saat verdict di-override RAG) ── */
+.verdict-source-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  width: fit-content;
+  margin-top: 0.4rem;
+  padding: 0.14rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  background: var(--hl-orange-bg);
+  color: var(--hl-orange-text);
+}
+
+/* ── Verdict Explanation (document.risk_explanation) ── */
+.verdict-explanation {
+  margin: 0.7rem 0 0;
+  padding: 0.6rem 0.75rem;
+  border-radius: 10px;
+  border-left: 3px solid var(--line);
+  background: #f7fbf9;
+  color: var(--muted);
+  font-size: 0.83rem;
+  line-height: 1.55;
+}
+
+.verdict-explanation--override {
+  border-left-color: #d98c00;
+  background: var(--hl-orange-bg);
+  color: var(--hl-orange-text);
+}
+
 .verdict-topic {
   font-size: 0.8rem;
   color: var(--muted);
@@ -411,6 +444,24 @@ button:disabled {
   border-radius: 12px;
   padding: 0.62rem 0.78rem;
   background: #f7fbf9;
+}
+
+/* Item evidence yang jadi pemicu override verdict RAG (lihat renderEvidence
+   di app.js) -- diberi aksen warna berbeda supaya langsung terlihat. */
+.evidence-item--override {
+  border-color: #d98c00;
+  background: var(--hl-orange-bg);
+}
+
+.evidence-item__override-tag {
+  display: inline-block;
+  margin-top: 0.32rem;
+  padding: 0.08rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  background: #ffe0ab;
+  color: var(--hl-orange-text);
 }
 
 .evidence-item__main {

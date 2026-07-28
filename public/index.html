@@ -104,18 +104,26 @@
             <div>
               <div id="verdictLabel" class="verdict-label"></div>
               <div id="verdictConf" class="verdict-conf"></div>
+              <!-- Muncul hanya saat verdict di-override oleh RAG (bukan hasil
+                   langsung IndoBERT) -- diisi & ditampilkan oleh app.js -->
+              <div id="verdictSourceBadge" class="verdict-source-badge hidden"></div>
             </div>
           </div>
           <div id="verdictTopic" class="verdict-topic hidden"></div>
         </div>
 
-        <!-- Daftar artikel cek-fakta TurnBackHoax yang paling mirip dengan teks
-             yang dianalisis (evidence retrieval / RAG). Diisi dinamis oleh app.js,
-             tersembunyi otomatis bila backend tidak mengembalikan evidence_matches
-             (mis. RAG belum aktif di backend, atau tidak ada artikel yang cukup mirip). -->
+        <!-- Penjelasan risiko/verdict (document.risk_explanation dari backend).
+             Diberi gaya berbeda saat verdict berasal dari override RAG. -->
+        <p id="verdictExplanation" class="verdict-explanation hidden"></p>
+
+        <!-- Daftar artikel cek-fakta (evidence retrieval / RAG) yang paling mirip
+             dengan teks yang dianalisis. Sumber data: API resmi Mafindo Antihoax.
+             Diisi dinamis oleh app.js, tersembunyi otomatis bila backend tidak
+             mengembalikan evidence_matches (mis. RAG belum aktif di backend, atau
+             tidak ada artikel yang cukup mirip). -->
         <section id="evidenceSection" class="evidence-section hidden">
           <h3 class="evidence-heading">
-            Artikel Cek Fakta Terkait (TurnBackHoax)
+            Artikel Cek Fakta Terkait (Mafindo Antihoax)
           </h3>
           <!-- Indikator sekunder jumlah artikel referensi RAG tersimpan di backend.
                Diisi & ditampilkan oleh app.js hanya bila RAG aktif & fetch /health berhasil. -->

@@ -92,6 +92,8 @@ const verdictBanner = document.getElementById("verdictBanner");
 const verdictIcon = document.getElementById("verdictIcon");
 const verdictLabel = document.getElementById("verdictLabel");
 const verdictConf = document.getElementById("verdictConf");
+const verdictSourceBadge = document.getElementById("verdictSourceBadge");
+const verdictExplanation = document.getElementById("verdictExplanation");
 const verdictTopic = document.getElementById("verdictTopic");
 const evidenceSection = document.getElementById("evidenceSection");
 const evidenceList = document.getElementById("evidenceList");
@@ -346,6 +348,14 @@ function resetOutput() {
   if (outputSection) outputSection.classList.add("hidden");
   if (verdictBanner) verdictBanner.classList.add("hidden");
   if (verdictTopic) verdictTopic.classList.add("hidden");
+  if (verdictSourceBadge) {
+    verdictSourceBadge.textContent = "";
+    verdictSourceBadge.classList.add("hidden");
+  }
+  if (verdictExplanation) {
+    verdictExplanation.textContent = "";
+    verdictExplanation.className = "verdict-explanation hidden";
+  }
   if (evidenceSection) evidenceSection.classList.add("hidden");
   if (evidenceList) evidenceList.innerHTML = "";
   if (confidenceList) confidenceList.innerHTML = "";
@@ -387,6 +397,38 @@ function renderVerdict(payload) {
     }
   }
 
+  // Verdict yang berasal dari override RAG (bukan langsung dari IndoBERT) --
+  // lihat _reconcile_verdict_with_rag di backend (app.py). Ditandai badge
+  // terpisah supaya user tidak bingung saat verdict dokumen "Hoaks" tapi
+  // highlight kalimat di bawahnya masih hijau (RAG cuma override di level
+  // dokumen, bukan per kalimat).
+  const isRagOverride =
+    String(doc.verdict_source || "").toLowerCase() === "rag_override";
+
+  if (verdictSourceBadge) {
+    if (isRagOverride) {
+      verdictSourceBadge.textContent =
+        "🔎 Verdict dari evidence RAG (hoaks terverifikasi)";
+      verdictSourceBadge.classList.remove("hidden");
+    } else {
+      verdictSourceBadge.textContent = "";
+      verdictSourceBadge.classList.add("hidden");
+    }
+  }
+
+  if (verdictExplanation) {
+    const explanation = String(doc.risk_explanation || "").trim();
+    if (explanation) {
+      verdictExplanation.textContent = explanation;
+      verdictExplanation.className = isRagOverride
+        ? "verdict-explanation verdict-explanation--override"
+        : "verdict-explanation";
+      verdictExplanation.classList.remove("hidden");
+    } else {
+      verdictExplanation.classList.add("hidden");
+    }
+  }
+
   verdictBanner.classList.remove("hidden");
 }
 
@@ -422,16 +464,22 @@ function formatEvidenceDate(rawDate) {
   });
 }
 
-// Merender daftar artikel cek-fakta TurnBackHoax yang mirip dengan teks yang
-// dianalisis (payload.document.evidence_matches). Otomatis tersembunyi bila
-// backend tidak mengembalikan field ini sama sekali (mis. RAG belum aktif)
-// atau memang tidak ada artikel yang cukup mirip -- tidak pernah error.
+// Merender daftar artikel cek-fakta (evidence retrieval / RAG, sumber: Mafindo
+// Antihoax) yang mirip dengan teks yang dianalisis
+// (payload.document.evidence_matches). Otomatis tersembunyi bila backend tidak
+// mengembalikan field ini sama sekali (mis. RAG belum aktif) atau memang tidak
+// ada artikel yang cukup mirip -- tidak pernah error. Item pertama (similarity
+// tertinggi) diberi aksen visual berbeda bila dialah yang memicu override
+// verdict (lihat _reconcile_verdict_with_rag di backend).
 function renderEvidence(payload) {
   if (!evidenceSection || !evidenceList) return;
 
   const items = Array.isArray(payload?.document?.evidence_matches)
     ? payload.document.evidence_matches
     : [];
+  const isRagOverride =
+    String(payload?.document?.verdict_source || "").toLowerCase() ===
+    "rag_override";
 
   evidenceList.innerHTML = "";
 
@@ -441,14 +489,19 @@ function renderEvidence(payload) {
   }
 
   const fragment = document.createDocumentFragment();
-  items.forEach((item) => {
+  items.forEach((item, idx) => {
     const title = String(item?.title || "").trim() || "Artikel tanpa judul";
     const url = String(item?.url || "").trim();
     const date = formatEvidenceDate(item?.date);
     const similarity = Number(item?.similarity);
+    // Item pertama (similarity tertinggi) adalah yang dipakai backend untuk
+    // aturan override RAG (_reconcile_verdict_with_rag di app.py).
+    const isOverrideTrigger = isRagOverride && idx === 0;
 
     const li = document.createElement("li");
-    li.className = "evidence-item";
+    li.className = isOverrideTrigger
+      ? "evidence-item evidence-item--override"
+      : "evidence-item";
 
     const main = document.createElement("div");
     main.className = "evidence-item__main";
@@ -476,6 +529,13 @@ function renderEvidence(payload) {
       meta.appendChild(simSpan);
     }
     main.appendChild(meta);
+
+    if (isOverrideTrigger) {
+      const overrideTag = document.createElement("span");
+      overrideTag.className = "evidence-item__override-tag";
+      overrideTag.textContent = "Pemicu override verdict";
+      main.appendChild(overrideTag);
+    }
 
     const badge = document.createElement("span");
     badge.className = `confidence-badge evidence-item__badge ${evidenceBadgeClass(item?.verdict)}`;
