@@ -53,7 +53,11 @@ THRESH_KALIMAT_PENDEK = float(os.getenv("THRESH_KALIMAT_PENDEK", "0.70"))
 # Ambang similarity RAG untuk override verdict IndoBERT. RAG diperlakukan sebagai
 # penentu kebenaran mutlak untuk hoax yang sudah diverifikasi ("known threats"),
 # sedangkan IndoBERT tetap jadi detektor utama untuk hoax baru ("zero-day hoax").
-RAG_OVERRIDE_SIM_THRESHOLD = float(os.getenv("RAG_OVERRIDE_SIM_THRESHOLD", "0.70"))
+# Default 0.75 hasil kalibrasi (evaluate_rag_threshold.py, sweep 0.55-0.95): pada
+# 0.55-0.70 override yang aktif seluruhnya salah (kandidat salah tertinggi
+# similarity 0.744), mulai 0.75 tidak ada override salah pada dataset A dan B.
+# Catatan: variabel env RAG_OVERRIDE_SIM_THRESHOLD di server mengalahkan default ini.
+RAG_OVERRIDE_SIM_THRESHOLD = float(os.getenv("RAG_OVERRIDE_SIM_THRESHOLD", "0.75"))
 
 
 # Ukuran batch untuk proses prediksi & embedding, memengaruhi kecepatan inferensi
@@ -129,7 +133,9 @@ model.eval()
 # ==== Inisialisasi variabel global: pemetaan label prediksi & threshold klasifikasi ====
 ID2LABEL: Dict[int, str] = {0: "not_hoax", 1: "hoax"}
 
-_DEFAULT_THRESHOLD_OPTIMAL: float = 0.47
+# Fallback bila inference_config.json tidak terbaca. Disamakan dengan nilai
+# threshold_optimal pada konfigurasi model di Hub (0.41).
+_DEFAULT_THRESHOLD_OPTIMAL: float = 0.41
 _INFERENCE_CONFIG: Dict[str, Any] = {}
 _THRESHOLD_OPTIMAL: float = _DEFAULT_THRESHOLD_OPTIMAL
 
@@ -1245,4 +1251,4 @@ def analyze(request: AnalyzeRequest):
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", "7860"))
-    uvicorn.run("app:app", host="0.0.0.0", port=port, reload=False)
+    uvicorn.run("app:app", host="0.0.0.0", port=port, reload=False)

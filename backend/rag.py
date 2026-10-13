@@ -40,6 +40,12 @@ REQUEST_TIMEOUT     = float(os.getenv("RAG_REQUEST_TIMEOUT", "15"))
 REQUEST_DELAY_SEC   = float(os.getenv("RAG_REQUEST_DELAY_SEC", "1.0"))
 RAG_TOP_K           = int(os.getenv("RAG_TOP_K", "3"))
 RAG_SIM_THRESHOLD   = float(os.getenv("RAG_SIM_THRESHOLD", "0.55"))
+# Jumlah kandidat teratas yang diperiksa sebelum deduplikasi salinan sindikasi.
+# Index berisi banyak entri untuk cerita yang sama (id & url berbeda), jadi pool
+# harus lebih besar dari RAG_TOP_K agar top-k berisi cerita yang berbeda.
+RAG_DEDUP_POOL      = int(os.getenv("RAG_DEDUP_POOL", "30"))
+# Bersihkan HTML pada index lama sekali saat startup (hasil disimpan & dibackup).
+RAG_AUTO_BERSIH     = os.getenv("RAG_AUTO_BERSIH", "1") == "1"
 # Jumlah artikel minimum yang harus ada di index sebelum beralih ke mode
 # "update saja" (/antihoax/latest). Selama n_articles < nilai ini,
 # _update_once selalu menjalankan bulk fetch /antihoax/ (dengan pagination)
@@ -279,19 +285,21 @@ def _parse_mafindo_item(item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if not article_id or not title:
         return None
 
-    # `references` = URL artikel cek-fakta di situs pemeriksa fakta (Tempo, CNN, dll.)
-    # Inilah tautan yang ingin ditampilkan ke pengguna ("baca selengkapnya").
-    # BERBEDA dengan `source_link` yang merupakan URL konten hoaks asli (Facebook, dll.)
+    # `references` = daftar tautan rujukan (satu per baris, bisa berisi banyak tautan).
+    # Pada index terbaru, tautan pertama sering menunjuk ke sumber unggahan (Facebook,
+    # Instagram, dll.), bukan selalu artikel cek-fakta. Disimpan apa adanya (kompatibel
+    # dengan index lama); satu tautan bersih dipilih saat keluaran lewat _bersihkan_url.
     url = str(item.get("references") or "").strip()
     if not url:
         # Fallback ke source_link bila references kosong (kasus tidak umum)
         url = str(item.get("source_link") or "").strip()
 
-    # Gabungkan content + fact untuk teks embedding yang kaya konteks:
+    # Gabungkan content + fact untuk teks embedding yang kaya konteks (HTML sudah
+    # dibuang lewat _bersihkan_html, supaya embedding tidak didominasi markup):
     # `content` = narasi/klaim hoaks yang beredar di masyarakat
     # `fact`    = klarifikasi/penjelasan fakta dari pemeriksa fakta
-    content = str(item.get("content") or "").strip()
-    fact    = str(item.get("fact")    or "").strip()
+    content = _bersihkan_html(item.get("content"))
+    fact    = _bersihkan_html(item.get("fact"))
     excerpt = f"{content} {fact}".strip()
 
     # `status` di API Mafindo v2: "1" = fakta, "2" = hoaks
@@ -469,6 +477,8 @@ def start_rag_background_update(
         global _rag_ready
         _store.load()
         _rag_ready = True
+        if RAG_AUTO_BERSIH:
+            _bersihkan_index_otomatis(embed_fn)
         while True:
             try:
                 _update_once(embed_fn)
@@ -477,6 +487,115 @@ def start_rag_background_update(
             time.sleep(interval_sec)
 
     threading.Thread(target=_loop, daemon=True, name="rag-updater").start()
+
+
+_PREFIKS_JUDUL_RE = re.compile(
+    r"^\s*(\[[^\]]+\]|(cek\s*fakta|hoaks|hoax|keliru|salah|tidak\s*benar|sebagian\s*salah|"
+    r"misinformasi|disinformasi|fakta|belum\s*terbukti)\s*[,:\-])\s*",
+    re.IGNORECASE,
+)
+_URL_HTTP_RE = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
+
+
+def _kunci_cerita(judul: str) -> str:
+    """Judul tanpa label ([SALAH], Hoaks, Keliru, ...), huruf kecil, spasi rapi.
+    Dipakai mengenali salinan sindikasi cerita yang sama (id & url berbeda)."""
+    j = _PREFIKS_JUDUL_RE.sub("", str(judul or ""))
+    return re.sub(r"\s+", " ", j).strip().lower()
+
+
+def _bersihkan_url(raw: Any) -> str:
+    """Ambil SATU tautan http/https pertama dari field `references` (multi-baris,
+    bisa memuat entitas HTML seperti &amp;). String kosong bila tidak ada tautan
+    valid. Skema selain http/https (mis. javascript:) tidak pernah lolos."""
+    m = _URL_HTTP_RE.search(html.unescape(str(raw or "")))
+    return m.group(0).rstrip(".,;") if m else ""
+
+
+_BLOK_HTML_RE = re.compile(r"<(script|style)\b.*?</\1\s*>", re.IGNORECASE | re.DOTALL)
+_TAG_HTML_RE  = re.compile(r"<[^>]*>")
+_TAG_SISA_RE  = re.compile(r"<[^>]*$")
+
+
+def _bersihkan_html(teks: Any) -> str:
+    """Ubah konten HTML dari API menjadi teks biasa: buang blok script/style dan
+    tag (termasuk tag yang terpotong di akhir string), dekode entitas (&amp;,
+    &nbsp;, ...), rapikan spasi. Tanpa ini, embedding didominasi markup."""
+    t = str(teks or "")
+    for _ in range(2):  # dua putaran: menangani entitas ganda seperti &lt;p&gt;
+        t = _BLOK_HTML_RE.sub(" ", t)
+        t = _TAG_HTML_RE.sub(" ", t)
+        t = _TAG_SISA_RE.sub(" ", t)
+        t = html.unescape(t)
+    return re.sub(r"\s+", " ", t).strip()
+
+
+def bangun_ulang_index_bersih(
+    metadata: List[Dict[str, Any]],
+    embed_fn: Callable[[List[str]], np.ndarray],
+) -> Tuple[List[Dict[str, Any]], np.ndarray, Dict[str, int]]:
+    """Bersihkan HTML pada excerpt index yang sudah ada lalu hitung ulang SEMUA
+    embedding. Keterbatasan: excerpt lama sudah terpotong 300 karakter, jadi entri
+    yang awalnya dipenuhi markup menyisakan sedikit teks (embedding condong ke
+    judul). Perbaikan penuh butuh pengambilan ulang konten dari API."""
+    baru: List[Dict[str, Any]] = []
+    n_berubah = n_pendek = 0
+    for m in metadata:
+        mm = dict(m)
+        lama = str(m.get("excerpt", ""))
+        ex = _bersihkan_html(lama)[:300]
+        n_berubah += int(ex != lama)
+        n_pendek += int(len(ex) < 30)
+        mm["excerpt"] = ex
+        baru.append(mm)
+    texts = [f"{a.get('title', '')}. {a['excerpt']}".strip() for a in baru]
+    emb = np.asarray(embed_fn(texts), dtype="float32")
+    return baru, emb, {"n_excerpt_berubah": n_berubah, "n_excerpt_pendek": n_pendek}
+
+
+_HTML_SISA_RE = re.compile(r"<[^>]*>|&(?:[a-zA-Z]{2,8}|#\d{1,6});")
+
+
+def _bersihkan_index_otomatis(
+    embed_fn: Callable[[List[str]], np.ndarray],
+    percobaan: int = 20,
+    jeda_sec: float = 30.0,
+) -> bool:
+    """Bersihkan excerpt ber-HTML pada index yang dimuat, hitung ulang embedding,
+    lalu simpan (save() juga membackup ke HF dataset). Tidak melakukan apa pun bila
+    index sudah bersih, sehingga aman dipanggil di setiap startup. Embedder bisa
+    belum siap saat startup, jadi dicoba ulang beberapa kali."""
+    with _store.lock:
+        if _store.embeddings is None or not _store.metadata:
+            return False
+        snapshot = [dict(m) for m in _store.metadata]
+    n_kotor = sum(1 for m in snapshot if _HTML_SISA_RE.search(str(m.get("excerpt", ""))))
+    if n_kotor == 0:
+        print("[INFO][RAG] Index sudah bersih dari HTML, pembersihan dilewati.")
+        return False
+    print(f"[INFO][RAG] {n_kotor}/{len(snapshot)} excerpt memuat HTML, membersihkan index...")
+    for ke in range(1, percobaan + 1):
+        try:
+            baru, emb, info = bangun_ulang_index_bersih(snapshot, embed_fn)
+            break
+        except Exception as e:
+            print(f"[WARN][RAG] Pembersihan index tertunda ({ke}/{percobaan}): {e}")
+            time.sleep(jeda_sec)
+    else:
+        print("[WARN][RAG] Pembersihan index dibatalkan, index lama tetap dipakai.")
+        return False
+    with _store.lock:
+        # Updater adalah satu-satunya penulis dan belum berjalan, tetapi tetap
+        # diperiksa agar tidak menimpa index yang jumlahnya berubah.
+        if len(_store.metadata) != len(baru) or emb.shape[0] != len(baru):
+            print("[WARN][RAG] Ukuran index berubah/tidak cocok, pembersihan dibatalkan.")
+            return False
+        _store.metadata = baru
+        _store.embeddings = emb
+        _store.last_updated = time.strftime("%Y-%m-%dT%H:%M:%S")
+        _store.save()
+    print(f"[INFO][RAG] Index dibersihkan: {info}")
+    return True
 
 
 def retrieve_evidence(
@@ -499,22 +618,44 @@ def retrieve_evidence(
             print(f"[WARN][RAG] Gagal encode query: {e}")
             return []
 
-        sims    = _store.embeddings @ np.asarray(q_emb, dtype="float32")
-        top_idx = np.argsort(-sims)[:top_k]
+        sims = _store.embeddings @ np.asarray(q_emb, dtype="float32")
+        n    = min(int(sims.shape[0]), len(_store.metadata))
+        pool = min(n, max(top_k * 10, RAG_DEDUP_POOL))
+        if pool < n:
+            kandidat = np.argpartition(-sims[:n], pool - 1)[:pool]
+            kandidat = kandidat[np.argsort(-sims[kandidat])]
+        else:
+            kandidat = np.argsort(-sims[:n])
 
-        results = []
-        for i in top_idx:
+        # Urut similarity menurun. Salinan sindikasi cerita yang sama dilewati
+        # (yang tertinggi dipertahankan) sehingga top-k berisi cerita berbeda.
+        # Item pertama dan similarity-nya tidak berubah, jadi aturan override
+        # RAG (_reconcile_verdict_with_rag) tidak terpengaruh.
+        results: List[Dict[str, Any]] = []
+        terlihat: Dict[str, int] = {}
+        for i in kandidat:
             score = float(sims[i])
             if score < threshold:
+                break
+            meta  = _store.metadata[int(i)]
+            kunci = _kunci_cerita(meta.get("title", ""))
+            url   = _bersihkan_url(meta.get("url", ""))
+            if kunci and kunci in terlihat:
+                wakil = results[terlihat[kunci]]
+                if not wakil["url"] and url:
+                    wakil["url"] = url
                 continue
-            meta = _store.metadata[int(i)]
+            if kunci:
+                terlihat[kunci] = len(results)
             results.append({
                 "title":      meta.get("title", ""),
-                "url":        meta.get("url", ""),
+                "url":        url,
                 "verdict":    meta.get("verdict", "tidak diketahui"),
                 "date":       meta.get("date", ""),
                 "similarity": round(score, 4),
             })
+            if len(results) >= top_k:
+                break
         return results
 
 
@@ -528,4 +669,4 @@ def rag_status() -> Dict[str, Any]:
         "last_fetch_error": _last_fetch_error,
         "persist_mode":     RAG_PERSIST_MODE,
         "last_backup_ok":   _last_backup_ok,
-    }
+    }

@@ -472,6 +472,20 @@ function formatEvidenceDate(rawDate) {
   });
 }
 
+// Memvalidasi tautan evidence: ambil baris pertama (field `references` dapat berisi
+// banyak tautan) dan hanya izinkan skema http/https. Skema lain (mis. javascript:)
+// dan teks non-URL menghasilkan string kosong sehingga judul tampil tanpa tautan.
+function urlEvidenceAman(raw) {
+  const baris = String(raw || "").split(/\s+/).find(Boolean) || "";
+  if (!baris) return "";
+  try {
+    const u = new URL(baris);
+    return u.protocol === "http:" || u.protocol === "https:" ? u.href : "";
+  } catch (err) {
+    return "";
+  }
+}
+
 // Merender daftar artikel cek-fakta (evidence retrieval / RAG, sumber: Mafindo
 // Antihoax) yang mirip dengan teks yang dianalisis
 // (payload.document.evidence_matches). Otomatis tersembunyi bila backend tidak
@@ -499,7 +513,7 @@ function renderEvidence(payload) {
   const fragment = document.createDocumentFragment();
   items.forEach((item, idx) => {
     const title = String(item?.title || "").trim() || "Artikel tanpa judul";
-    const url = String(item?.url || "").trim();
+    const url = urlEvidenceAman(item?.url);
     const date = formatEvidenceDate(item?.date);
     const similarity = Number(item?.similarity);
     // Item pertama (similarity tertinggi) adalah yang dipakai backend untuk
