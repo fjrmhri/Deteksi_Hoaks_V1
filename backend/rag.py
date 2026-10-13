@@ -491,17 +491,27 @@ def start_rag_background_update(
 
 _PREFIKS_JUDUL_RE = re.compile(
     r"^\s*(\[[^\]]+\]|(cek\s*fakta|hoaks|hoax|keliru|salah|tidak\s*benar|sebagian\s*salah|"
-    r"misinformasi|disinformasi|fakta|belum\s*terbukti)\s*[,:\-])\s*",
+    r"misinformasi|disinformasi|fakta|belum\s*terbukti)\s*[,:\-!]+|"
+    r"(hoaks|hoax|keliru|tidak\s*benar|misinformasi|disinformasi)\s+)\s*",
     re.IGNORECASE,
 )
 _URL_HTTP_RE = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
 
 
 def _kunci_cerita(judul: str) -> str:
-    """Judul tanpa label ([SALAH], Hoaks, Keliru, ...), huruf kecil, spasi rapi.
-    Dipakai mengenali salinan sindikasi cerita yang sama (id & url berbeda)."""
-    j = _PREFIKS_JUDUL_RE.sub("", str(judul or ""))
-    return re.sub(r"\s+", " ", j).strip().lower()
+    """Judul tanpa label ([SALAH], "Cek Fakta: Hoaks", Keliru, ...), tanda baca, dan
+    spasi di "Rp 500" -> "rp500", huruf kecil. Dipakai mengenali salinan sindikasi
+    cerita yang sama (id & url berbeda)."""
+    j = str(judul or "")
+    for _ in range(3):  # label bisa bertumpuk: "Cek Fakta: Hoaks ..."
+        j2 = _PREFIKS_JUDUL_RE.sub("", j, count=1)
+        if j2 == j:
+            break
+        j = j2
+    j = j.lower()
+    j = re.sub(r"\brp\.?\s*(?=\d)", "rp", j)
+    j = re.sub(r"[^\w\s]", " ", j)
+    return re.sub(r"\s+", " ", j).strip()
 
 
 def _bersihkan_url(raw: Any) -> str:
