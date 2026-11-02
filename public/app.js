@@ -459,15 +459,27 @@ function evidenceBadgeText(verdict) {
 }
 
 // Memformat tanggal artikel evidence (format 'YYYY-MM-DD' dari backend) menjadi
-// format singkat berbahasa Indonesia; fallback ke teks mentah bila tidak valid.
+// DD/MM/YYYY; fallback ke teks mentah bila tidak valid.
 function formatEvidenceDate(rawDate) {
   const raw = String(rawDate || "").trim();
   if (!raw) return "";
+  // Tanggal ISO (boleh diikuti jam) diformat langsung dari string agar zona
+  // waktu browser tidak menggeser hari.
+  const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})(?:$|[T\s])/);
+  if (iso) {
+    const [, y, m, d] = iso;
+    const cek = new Date(Date.UTC(Number(y), Number(m) - 1, Number(d)));
+    const valid =
+      cek.getUTCFullYear() === Number(y) &&
+      cek.getUTCMonth() === Number(m) - 1 &&
+      cek.getUTCDate() === Number(d);
+    return valid ? `${d}/${m}/${y}` : raw;
+  }
   const parsed = new Date(raw);
   if (Number.isNaN(parsed.getTime())) return raw;
   return parsed.toLocaleDateString("id-ID", {
-    day: "numeric",
-    month: "short",
+    day: "2-digit",
+    month: "2-digit",
     year: "numeric",
   });
 }
@@ -685,7 +697,22 @@ function buildSummaryModel(paragraphs, mode) {
         if (cat === "hoaks") hasH = true;
         if (cat === "fakta") hasF = true;
       });
-      pc[hasH ? "hoaks" : hasF ? "fakta" : "ragu"]++;
+      // Kategori paragraf mengikuti label paragraf dari backend (mayoritas kalimat,
+      // seri = hoaks) dengan aturan "ragu" yang sama seperti kalimat. Bila label
+      // paragraf tidak ada (mis. paragraf hasil buildFallbackParagraphs), dipakai
+      // perilaku lama: paragraf hoaks bila memuat satu kalimat hoaks.
+      if (typeof item?.label === "string" && item.label.trim() !== "") {
+        const pConf = Number(item?.confidence);
+        pc[
+          !Number.isFinite(pConf) || pConf < CONFIDENCE_CUTOFF
+            ? "ragu"
+            : normalizeLabel(item.label) === "hoaks"
+              ? "hoaks"
+              : "fakta"
+        ]++;
+      } else {
+        pc[hasH ? "hoaks" : hasF ? "fakta" : "ragu"]++;
+      }
     });
   } else {
     items.forEach((item) => {
